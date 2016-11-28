@@ -21,6 +21,9 @@ type R = Float
 data F
 data C
 data A
+data M
+data R1 (c :: * -> *)
+data R2 (c :: * -> *)
 data S a b
 data RunLayer :: * -> * where
   -- Densely connected layer
@@ -28,7 +31,7 @@ data RunLayer :: * -> * where
   -- output:  vector of size n
   -- weights: matrix of size m x n
   -- biases:  vector of size n
-  Full :: !(Matrix R) -> !(Vector R) -> (R -> R, R -> R) -> RunLayer F
+  Full :: !(Matrix R) -> !(Vector R) -> RunLayer F
   -- convolutional layer
   -- input:  channels of 2D floats, of the same size (a x b), # of input channels:  m
   -- output: channels of 2D floats, of the same size (c x d), # of output channels: n
@@ -44,6 +47,18 @@ data RunLayer :: * -> * where
   -- output: 1D vector of the concatenation of all input channels
   --         its size: m x a x b
   As1D  :: RunLayer A
+  -- max pooling layer
+  -- input:  channels of 2D floats, of the same size (a x b), # of input channels:  m
+  --         assuming that a and b are both multiple of stride
+  -- output: channels of 2D floats, of the same size (c x d), # of output channels: m
+  --         where c = a / stride
+  --               d = b / stride
+  MaxP :: Int -> RunLayer M
+  -- Relu activator for single channel input
+  -- the input can be either a 1D vector or 2D matrix
+  ReLU1 :: RunLayer (R1 c)
+  -- Relu activator for multiple channels input
+  ReLU2 :: RunLayer (R2 c)
   -- stacking two components a and b
   -- the output of a should matches the input of b
   Stack :: !(RunLayer a) -> !(RunLayer b) -> RunLayer (S a b)
@@ -51,21 +66,18 @@ data RunLayer :: * -> * where
 instance Component (RunLayer F) where
     type Inp (RunLayer F) = Vector R
     type Out (RunLayer F) = Vector R
-    -- trace is (input, weighted-sum, output)
-    newtype Trace (RunLayer F) = DTrace (Vector R, Vector R, Vector R)
-    forwardT (Full w b (af,_)) !inp =
+    -- trace is (input, weighted-sum)
+    newtype Trace (RunLayer F) = DTrace (Vector R, Vector R)
+    forwardT (Full w b) !inp =
         let !bv = (inp <# w) `add` b
-            !av = cmap af bv
-        in DTrace (inp,bv,av)
-    output (DTrace (_,_,!a)) = a
-    backward l (DTrace (!iv,!bv,_)) !odelta rate =
-        let Full w b ac@(_,af') = l
-            -- back-propagated error before activation
-            udelta = odelta `hadamard` cmap af' bv
-            !d = scale (negate rate) udelta
+        in DTrace (inp,bv)
+    output (DTrace (_,!a)) = a
+    backward l (DTrace (!iv,!bv)) !odelta rate =
+        let Full w b = l
+            !d = scale (negate rate) odelta
             !m = iv `outer` d
             -- back-propagated error at input
-            !idelta = w #> udelta
+            !idelta = w #> odelta
             -- update to weights
             ---- for what reason, could this expression: w `add` (iv `outer` d)
             ---- entails a huge space leak? especially, neither 'seq' nor
@@ -79,7 +91,7 @@ instance Component (RunLayer F) where
             --      in matrixFromVector ColumnMajor r c $ SV.force $ dat1 `add` dat2
             !b'= b `add` d
             -- !b'= SV.force $ b `add` d
-        in (Full w' b' ac, idelta)
+        in (Full w' b', idelta)
 
 instance Component (RunLayer C) where
     type Inp (RunLayer C) = V.Vector (Matrix R)
@@ -139,6 +151,24 @@ instance Component (RunLayer A) where
     let !idelta = V.fromList $ map (reshape c) $ takesV (replicate b n) odelta
     in (a, idelta)
 
+instance Component (RunLayer M) where
+  type Inp (RunLayer M) = V.Vector (Matrix R)
+  type Out (RunLayer M) = V.Vector (Matrix R)
+  -- trace is (dimension of pools, index of max in each pool, pooled matrix)
+  -- for each channel.
+  newtype Trace (RunLayer M) = PTrace (V.Vector (IndexOf Matrix, Vector Int, Matrix R))
+  -- forward is to divide the input matrix in stride x stride sub matrices,
+  -- and then find the max element in each sub matrices.
+  forwardT (MaxP stride) !inp = PTrace $ parallel $ V.map mk inp
+    where
+      mk inp = let (!i,!v) = pool stride inp in (size v, i, v)
+  output (PTrace a) = V.map (\(_,_,!o) ->o) a
+  -- use the saved index-of-max in each pool to propagate the error.
+  backward l@(MaxP stride) (PTrace t) odelta _ =
+      let !idelta = V.zipWith gen t odelta in (l, idelta)
+    where
+      gen (!si,!iv,_) od = unpool stride iv od
+
 instance (Component (RunLayer a),
           Component (RunLayer b),
           Out (RunLayer a) ~ Inp (RunLayer b)
@@ -156,17 +186,33 @@ instance (Component (RunLayer a),
             (a', !idelta ) = backward a tra odelta' rate
         in (Stack a' b', idelta)
 
-newDLayer :: (Int, Int)         -- number of input channels, number of neurons (output channels)
-          -> (R->R, R->R)       -- activate function and its derivative
+instance (Container c R) => Component (RunLayer (R1 c)) where
+    type Inp (RunLayer (R1 c)) = c R
+    type Out (RunLayer (R1 c)) = c R
+    newtype Trace (RunLayer (R1 c)) = ReluTrace (c R, c R)
+    forwardT _ !inp = ReluTrace (inp, cmap relu inp)
+    output (ReluTrace (_,!a)) = a
+    backward a (ReluTrace (!iv,_)) !odelta _ = (a, odelta `hadamard` cmap relu' iv)
+
+instance (Container c R) => Component (RunLayer (R2 c)) where
+    type Inp (RunLayer (R2 c)) = V.Vector (c R)
+    type Out (RunLayer (R2 c)) = V.Vector (c R)
+    newtype Trace (RunLayer (R2 c)) = ReluTraceM (V.Vector (Trace (RunLayer (R1 c))))
+    forwardT _ !inp = ReluTraceM $ V.map (forwardT ReLU1) inp
+    output (ReluTraceM a) = V.map output a
+    backward a (ReluTraceM ts) !odelta r = (a, V.zipWith (\t d -> snd $ backward ReLU1 t d r) ts odelta)
+
+newFLayer :: Int                -- number of input values
+          -> Int                -- number of neurons (output values)
           -> IO (RunLayer F)    -- new layer
-newDLayer sz@(_,n) (af, af') =
+newFLayer m n =
     withSystemRandom . asGenIO $ \gen -> do
         -- we build the weights in column major because in the back-propagation
         -- algo, the computed update to weights is in column major. So it is
         -- good for performance to keep the matrix always in column major.
-        w <- buildMatrix (normal 0 0.01 gen) ColumnMajor sz
+        w <- buildMatrix (normal 0 0.01 gen) ColumnMajor (m,n)
         b <- return $ konst 1 n
-        return $ Full w b (af, af')
+        return $ Full w b
 
 newCLayer :: Int                -- number of input channels
           -> Int                -- number of output channels

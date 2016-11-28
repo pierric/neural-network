@@ -24,4 +24,7 @@ library
   default-language:    Haskell2010
   C-sources:           cbits/conv.c
   cc-options:          -O3 -std=c11 -march=native
-  extra-libraries:     blas
+  if os(windows)
+      extra-libraries: openblas
+  if os(linux)
+      extra-libraries: blas

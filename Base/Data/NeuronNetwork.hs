@@ -10,7 +10,8 @@ module Data.NeuronNetwork (
   SpecIn2D(..),
   SpecReshape2DAs1D(..),
   SpecFullConnect(..),
-  SpecConvolution(..)
+  SpecConvolution(..),
+  SpecMaxPooling(..)
 ) where
 
 import Data.Constraint

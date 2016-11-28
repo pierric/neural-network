@@ -1,22 +1,20 @@
--- {-# LANGUAGE ExistentialQuantification #-}
-{-# LANGUAGE MultiParamTypeClasses, FunctionalDependencies, FlexibleContexts, FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses, FlexibleContexts, FlexibleInstances #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE TypeFamilies #-}
 module Data.NeuronNetwork.Backend.HMatrix (
   module Data.NeuronNetwork.Backend.HMatrix.Layers,
   ByHmatrix(..),
-  Err(..),
-  M
+  ErrCode(..)
 ) where
 
 import Data.NeuronNetwork
 import Data.NeuronNetwork.Backend.HMatrix.Utils
 import Data.NeuronNetwork.Backend.HMatrix.Layers
-
+import Numeric.LinearAlgebra (Vector, Matrix)
 import Control.Monad.Except
 
-data Err = ErrMismatch
-type M   = ExceptT Err IO
+data ErrCode = ErrMismatch
+type Err     = ExceptT ErrCode IO
 
 -- the backend type
 data ByHmatrix = ByHmatrix
@@ -24,14 +22,14 @@ data ByHmatrix = ByHmatrix
 -- with 1D input
 instance (TranslateBody s, Component (RunLayer (SpecToTag s))) =>
     Backend ByHmatrix (SpecIn1D :++ s) where
-  type Env ByHmatrix = M
+  type Env ByHmatrix = Err
   type ConvertFromSpec (SpecIn1D :++ s) = RunLayer (SpecToTag s)
   compile _ (a :++ l)= trans (size Nothing a) l
 
 -- with 2D input
 instance (TranslateBody s, Component (RunLayer (SpecToTag s))) =>
     Backend ByHmatrix (SpecIn2D :++ s) where
-  type Env ByHmatrix = M
+  type Env ByHmatrix = Err
   type ConvertFromSpec (SpecIn2D :++ s) = RunLayer (SpecToTag s)
   compile _ (a :++ l)= trans (size Nothing a) l
 
@@ -52,26 +50,35 @@ instance ComputeSize SpecFullConnect where
   size _ (FullConnect n)   = D1 n
 instance ComputeSize SpecConvolution where
   size (Just (D2 _ m n)) (Convolution k f p) = D2 k (m+2*p-f+1) (n+2*p-f+1)
+instance ComputeSize SpecMaxPooling where
+  size (Just (D2 k m n)) (MaxPooling s) = D2 k (m `div` s) (n `div` s)
 
 -- translate the body of specification
 class TranslateBody s where
   type SpecToTag s
-  trans :: Size -> s -> M (RunLayer (SpecToTag s))
+  trans :: Size -> s -> Err (RunLayer (SpecToTag s))
 
 instance TranslateBody SpecFullConnect where
-  type SpecToTag SpecFullConnect = F
-  trans (D1 s) (FullConnect n) = lift $ newDLayer (s,n) (relu, relu')
+  type SpecToTag SpecFullConnect = S F (R1 Vector)
+  trans (D1 s) (FullConnect n) = do u <- lift $ newFLayer s n
+                                    return $ Stack u ReLU1
   trans _ _ = throwError ErrMismatch
 
 instance TranslateBody SpecConvolution where
-  type SpecToTag SpecConvolution = C
-  trans (D2 k s t) (Convolution n f p) = lift $ newCLayer k n f p
+  type SpecToTag SpecConvolution = S C (R2 Matrix)
+  trans (D2 k s t) (Convolution n f p) = do u <- lift $ newCLayer k n f p
+                                            return $ Stack u ReLU2
   trans _ _ = throwError ErrMismatch
 
 instance TranslateBody SpecReshape2DAs1D where
-  type SpecToTag SpecReshape2DAs1D  = A
+  type SpecToTag SpecReshape2DAs1D = A
   trans (D2 _ _ _) _ = return As1D
   trans (D1 _)     _ = throwError ErrMismatch
+
+instance TranslateBody SpecMaxPooling where
+  type SpecToTag SpecMaxPooling = M
+  trans (D2 _ _ _) (MaxPooling n) = return (MaxP n)
+  trans (D1 _)     _              = throwError ErrMismatch
 
 instance (TranslateBody a, TranslateBody c, ComputeSize a) => TranslateBody (a :++ c) where
   type SpecToTag (a :++ b) = S (SpecToTag a) (SpecToTag b)
