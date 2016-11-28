@@ -19,7 +19,7 @@ foo :: Backend b s => b -> s -> Inp (ConvertFromSpec s) -> Env b (Out (ConvertFr
 foo b s i = case witness b s of Dict -> compile b s >>= return . flip forward i
 
 main = do
-    cnn <- runExceptT $ compile ByHmatrix (In2D 28 28 :++ Convolution 4 7 3 :++ Reshape2DAs1D :++ FullConnect 128 :++ FullConnect 10)
+    cnn <- runExceptT $ compile ByHmatrix (In2D 28 28 :++ Convolution 1 7 3 :++ Reshape2DAs1D :++ FullConnect 128 :++ FullConnect 10)
     case cnn of
       Left e  -> putStrLn "Error"
       Right nn -> do
@@ -27,7 +27,7 @@ main = do
         dataset <- uncurry zip <$> trainingData
         putStrLn "Load test data."
         putStrLn "Learning."
-        nn <- iterateM 30 (online dataset) nn
+        nn <- iterateM 15 (online dataset) nn
         dotest nn
 
 dotest :: (Component n, Inp n ~ Image, Out n ~ Label) => n -> IO ()

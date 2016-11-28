@@ -18,13 +18,26 @@ import Data.NeuronNetwork.Backend.HMatrix.Utils
 
 type R = Float
 
+-- We parameterise the activation layer T, where the parameter indicates how
+-- elements are contained:
+--   SinglC :. Vector, SinglC :. Matrix, MultiC :. Vector, MultiC :.  Matrix
+-- SinglC means the input has only one channel, while
+-- MultiC means the input has more than one.
+--
+-- type function composition
+data (f :: * -> *) :. (g :: * -> *) :: * -> *
+-- type function: Identity
+data SinglC :: * -> *
+data MultiC :: * -> *
+
+-- Tags for each form of layer
 data F
 data C
 data A
 data M
-data R1 (c :: * -> *)
-data R2 (c :: * -> *)
+data T (c :: * -> *)
 data S a b
+
 data RunLayer :: * -> * where
   -- Densely connected layer
   -- input:   vector of size m
@@ -54,11 +67,9 @@ data RunLayer :: * -> * where
   --         where c = a / stride
   --               d = b / stride
   MaxP :: Int -> RunLayer M
-  -- Relu activator for single channel input
-  -- the input can be either a 1D vector or 2D matrix
-  ReLU1 :: RunLayer (R1 c)
-  -- Relu activator for multiple channels input
-  ReLU2 :: RunLayer (R2 c)
+  -- Activator
+  -- the input can be either a 1D vector, 2D matrix, or channels of either.
+  Activation :: (R->R, R->R) -> RunLayer (T c)
   -- stacking two components a and b
   -- the output of a should matches the input of b
   Stack :: !(RunLayer a) -> !(RunLayer b) -> RunLayer (S a b)
@@ -186,21 +197,21 @@ instance (Component (RunLayer a),
             (a', !idelta ) = backward a tra odelta' rate
         in (Stack a' b', idelta)
 
-instance (Container c R) => Component (RunLayer (R1 c)) where
-    type Inp (RunLayer (R1 c)) = c R
-    type Out (RunLayer (R1 c)) = c R
-    newtype Trace (RunLayer (R1 c)) = ReluTrace (c R, c R)
-    forwardT _ !inp = ReluTrace (inp, cmap relu inp)
-    output (ReluTrace (_,!a)) = a
-    backward a (ReluTrace (!iv,_)) !odelta _ = (a, odelta `hadamard` cmap relu' iv)
+instance (Container c R) => Component (RunLayer (T (MultiC :. c))) where
+    type Inp (RunLayer (T (MultiC :. c))) = V.Vector (c R)
+    type Out (RunLayer (T (MultiC :. c))) = V.Vector (c R)
+    newtype Trace (RunLayer (T (MultiC :. c))) = TTraceM (V.Vector (Trace (RunLayer (T (SinglC :. c)))))
+    forwardT (Activation ac) !inp = TTraceM $ V.map (forwardT (Activation ac)) inp
+    output (TTraceM a) = V.map output a
+    backward a@(Activation ac) (TTraceM ts) !odelta r = (a, V.zipWith (\t d -> snd $ backward (Activation ac) t d r) ts odelta)
 
-instance (Container c R) => Component (RunLayer (R2 c)) where
-    type Inp (RunLayer (R2 c)) = V.Vector (c R)
-    type Out (RunLayer (R2 c)) = V.Vector (c R)
-    newtype Trace (RunLayer (R2 c)) = ReluTraceM (V.Vector (Trace (RunLayer (R1 c))))
-    forwardT _ !inp = ReluTraceM $ V.map (forwardT ReLU1) inp
-    output (ReluTraceM a) = V.map output a
-    backward a (ReluTraceM ts) !odelta r = (a, V.zipWith (\t d -> snd $ backward ReLU1 t d r) ts odelta)
+instance (Container c R) => Component (RunLayer (T (SinglC :. c))) where
+    type Inp (RunLayer (T (SinglC :. c))) = c R
+    type Out (RunLayer (T (SinglC :. c))) = c R
+    newtype Trace (RunLayer (T (SinglC :. c))) = TTraceS (c R, c R)
+    forwardT (Activation (af,_)) !inp = TTraceS (inp, cmap af inp)
+    output (TTraceS (_,!a)) = a
+    backward a@(Activation (_,ag)) (TTraceS (!iv,_)) !odelta _ = (a, odelta `hadamard` cmap ag iv)
 
 newFLayer :: Int                -- number of input values
           -> Int                -- number of neurons (output values)

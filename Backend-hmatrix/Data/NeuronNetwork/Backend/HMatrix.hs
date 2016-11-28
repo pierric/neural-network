@@ -59,15 +59,15 @@ class TranslateBody s where
   trans :: Size -> s -> Err (RunLayer (SpecToTag s))
 
 instance TranslateBody SpecFullConnect where
-  type SpecToTag SpecFullConnect = S F (R1 Vector)
+  type SpecToTag SpecFullConnect = S F (T (SinglC :. Vector))
   trans (D1 s) (FullConnect n) = do u <- lift $ newFLayer s n
-                                    return $ Stack u ReLU1
+                                    return $ Stack u (Activation (relu, relu'))
   trans _ _ = throwError ErrMismatch
 
 instance TranslateBody SpecConvolution where
-  type SpecToTag SpecConvolution = S C (R2 Matrix)
+  type SpecToTag SpecConvolution = S C (T (MultiC :. Matrix))
   trans (D2 k s t) (Convolution n f p) = do u <- lift $ newCLayer k n f p
-                                            return $ Stack u ReLU2
+                                            return $ Stack u (Activation (relu, relu'))
   trans _ _ = throwError ErrMismatch
 
 instance TranslateBody SpecReshape2DAs1D where
