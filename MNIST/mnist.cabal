@@ -1,0 +1,14 @@
+name:                mnist
+version:             0.1.0.0
+license-file:        LICENSE
+author:              jason wu
+maintainer:          jiasenwu@hotmail.com
+build-type:          Simple
+cabal-version:       >=1.10
+
+executable mnist
+  main-is:             Main.hs
+  other-modules:       Parser
+  build-depends:       base, neural-network-base, neural-network-hmatrix, hmatrix, binary,
+                        constraints, vector, bytestring, zlib, parallel, mtl
+  default-language:    Haskell2010
