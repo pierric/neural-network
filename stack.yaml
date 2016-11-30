@@ -38,6 +38,7 @@ resolver: lts-7.10
 packages:
 - 'Base'
 - 'Backend-hmatrix'
+- 'Backend-blashs'
 - 'MNIST'
 - '../hmatrix/packages/base/'
 - '../hmatrix/packages/gsl/'
