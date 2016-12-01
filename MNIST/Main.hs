@@ -15,29 +15,32 @@ import Control.Monad
 import Control.Monad.Except
 
 import Data.Constraint
-foo :: Backend b s => b -> s -> Inp (ConvertFromSpec s) -> Env b (Out (ConvertFromSpec s))
-foo b s i = case witness b s of Dict -> compile b s >>= return . flip forward i
+eval :: Backend b s => b -> s -> (ConvertFromSpec s -> ) -> Env b (Out (ConvertFromSpec s))
+eval b s i = case witness b s of Dict -> compile b s >>= run . flip forward i
 
-main = do
-    cnn <- runExceptT $ compile ByHmatrix (In2D 28 28 :++ Convolution 1 7 3 :++ Reshape2DAs1D :++ FullConnect 128 :++ FullConnect 10)
-    case cnn of
-      Left e  -> putStrLn "Error"
-      Right nn -> do
-        putStrLn "Load training data."
-        dataset <- uncurry zip <$> trainingData
-        putStrLn "Load test data."
-        putStrLn "Learning."
-        nn <- iterateM 15 (online dataset) nn
-        dotest nn
+main = do x <- runExceptT body
+          case x of
+            Left  _ -> putStrLn "Error."
+            Right _ -> putStrLn "Done."
 
-dotest :: (Component n, Inp n ~ Image, Out n ~ Label) => n -> IO ()
+  where
+    body = do
+      cnn <- compile ByHmatrix (In2D 28 28 :++ Convolution 1 7 3 :++ Reshape2DAs1D :++ FullConnect 128 :++ FullConnect 10)
+      putStrLn "Load training data."
+      dataset <- uncurry zip <$> trainingData
+      putStrLn "Load test data."
+      putStrLn "Learning."
+      nn <- iterateM 15 (online dataset) nn
+      dotest nn
+
+dotest :: (Component n, Inp n ~ Image, Out n ~ Label) => n -> Env n ()
 dotest !nn = do
-    testset <- uncurry zip <$> testData
-    putStrLn "Start test"
-    let result = map (postprocess . forward nn . fst) testset `using` parList rdeepseq
-        expect = map (postprocess . snd) testset
+    testset <- liftIO $ (uncurry zip <$> testData)
+    liftIO $ putStrLn "Start test"
+    result  <- mapM (postprocess . forward nn . fst) testset `using` parList rdeepseq
+    let expect = map (postprocess . snd) testset
         (co,wr)= partition (uncurry (==)) $ zip result expect
-    putStrLn $ printf "correct: %d, wrong: %d" (length co) (length wr)
+    liftIO $ putStrLn $ printf "correct: %d, wrong: %d" (length co) (length wr)
 
 online ds !nn = walk ds nn
   where

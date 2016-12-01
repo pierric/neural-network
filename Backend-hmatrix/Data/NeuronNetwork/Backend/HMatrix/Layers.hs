@@ -12,6 +12,7 @@ import Control.Monad.ST
 import Control.Monad (liftM2, forM_, when)
 import GHC.Float
 import Data.STRef
+import Data.Functor.Identity
 import Control.DeepSeq
 import Data.NeuronNetwork
 import Data.NeuronNetwork.Backend.HMatrix.Utils
@@ -75,13 +76,14 @@ data RunLayer :: * -> * where
   Stack :: !(RunLayer a) -> !(RunLayer b) -> RunLayer (S a b)
 
 instance Component (RunLayer F) where
+    type Run (RunLayer F) = Identity
     type Inp (RunLayer F) = Vector R
     type Out (RunLayer F) = Vector R
     -- trace is (input, weighted-sum)
     newtype Trace (RunLayer F) = DTrace (Vector R, Vector R)
     forwardT (Full w b) !inp =
         let !bv = (inp <# w) `add` b
-        in DTrace (inp,bv)
+        in return $ DTrace (inp,bv)
     output (DTrace (_,!a)) = a
     backward l (DTrace (!iv,!bv)) !odelta rate =
         let Full w b = l
@@ -102,9 +104,10 @@ instance Component (RunLayer F) where
             --      in matrixFromVector ColumnMajor r c $ SV.force $ dat1 `add` dat2
             !b'= b `add` d
             -- !b'= SV.force $ b `add` d
-        in (Full w' b', idelta)
+        in return $ (Full w' b', idelta)
 
 instance Component (RunLayer C) where
+    type Run (RunLayer C) = Identity
     type Inp (RunLayer C) = V.Vector (Matrix R)
     type Out (RunLayer C) = V.Vector (Matrix R)
     -- trace is (input, convoluted output)
@@ -113,7 +116,7 @@ instance Component (RunLayer C) where
         let !ov = parallel $ V.zipWith feature
                                (tr fs) -- feature matrix indexed majorly by each output
                                bs      -- biases by each output
-        in CTrace (inp,ov)
+        in return $ CTrace (inp,ov)
       where
         !osize = let (x,y) = size (V.head inp)
                      (u,v) = size (V.head $ V.head fs)
@@ -145,9 +148,10 @@ instance Component (RunLayer C) where
           idelta :: V.Vector (Matrix R)
           !idelta = V.map (\f -> V.foldl1' add $ V.zipWith (layerConv2 p) f odelta) fs
       in --trace ("CL:" ++ show odelta)
-         (Conv m b p, idelta)
+         return $ (Conv m b p, idelta)
 
 instance Component (RunLayer A) where
+  type Run (RunLayer A) = Identity
   type Inp (RunLayer A) = V.Vector (Matrix R)
   type Out (RunLayer A) = Vector R
   -- trace keeps information of (m, axb, b, output)
@@ -156,13 +160,14 @@ instance Component (RunLayer A) where
     let !b = V.length inp
         (!r,!c) = size (V.head inp)
         !o = V.foldr' (\x y -> flatten x SV.++ y) SV.empty inp
-    in ReshapeTrace (b, r*c, c, o)
+    in return $ ReshapeTrace (b, r*c, c, o)
   output (ReshapeTrace (_,_,_,a)) = a
   backward a (ReshapeTrace (b,n,c,_)) !odelta _ =
     let !idelta = V.fromList $ map (reshape c) $ takesV (replicate b n) odelta
-    in (a, idelta)
+    in return $ (a, idelta)
 
 instance Component (RunLayer M) where
+  type Run (RunLayer M) = Identity
   type Inp (RunLayer M) = V.Vector (Matrix R)
   type Out (RunLayer M) = V.Vector (Matrix R)
   -- trace is (dimension of pools, index of max in each pool, pooled matrix)
@@ -170,48 +175,56 @@ instance Component (RunLayer M) where
   newtype Trace (RunLayer M) = PTrace (V.Vector (IndexOf Matrix, Vector Int, Matrix R))
   -- forward is to divide the input matrix in stride x stride sub matrices,
   -- and then find the max element in each sub matrices.
-  forwardT (MaxP stride) !inp = PTrace $ parallel $ V.map mk inp
+  forwardT (MaxP stride) !inp = return $ PTrace $ parallel $ V.map mk inp
     where
       mk inp = let (!i,!v) = pool stride inp in (size v, i, v)
   output (PTrace a) = V.map (\(_,_,!o) ->o) a
   -- use the saved index-of-max in each pool to propagate the error.
   backward l@(MaxP stride) (PTrace t) odelta _ =
-      let !idelta = V.zipWith gen t odelta in (l, idelta)
+      let !idelta = V.zipWith gen t odelta in return $ (l, idelta)
     where
       gen (!si,!iv,_) od = unpool stride iv od
 
 instance (Component (RunLayer a),
           Component (RunLayer b),
+          Run (RunLayer a) ~ Identity,
+          Run (RunLayer b) ~ Identity,
           Out (RunLayer a) ~ Inp (RunLayer b)
          ) => Component (RunLayer (S a b)) where
+    type Run (RunLayer (S a b)) = Identity
     type Inp (RunLayer (S a b)) = Inp (RunLayer a)
     type Out (RunLayer (S a b)) = Out (RunLayer b)
     newtype Trace (RunLayer (S a b)) = TTrace (Trace (RunLayer b), Trace (RunLayer a))
-    forwardT (Stack a b) !i =
-        let !tra = forwardT a i
-            !trb = forwardT b (output tra)
-        in TTrace (trb, tra)
+    forwardT (Stack a b) !i = do
+        !tra <- forwardT a i
+        !trb <- forwardT b (output tra)
+        return $ TTrace (trb, tra)
     output (TTrace !a) = output (fst a)
-    backward (Stack a b) (TTrace (!trb,!tra)) !odelta rate =
-        let (b', !odelta') = backward b trb odelta  rate
-            (a', !idelta ) = backward a tra odelta' rate
-        in (Stack a' b', idelta)
+    backward (Stack a b) (TTrace (!trb,!tra)) !odelta rate = do
+        (b', !odelta') <- backward b trb odelta  rate
+        (a', !idelta ) <- backward a tra odelta' rate
+        return (Stack a' b', idelta)
 
 instance (Container c R) => Component (RunLayer (T (MultiC :. c))) where
+    type Run (RunLayer (T (MultiC :. c))) = Identity
     type Inp (RunLayer (T (MultiC :. c))) = V.Vector (c R)
     type Out (RunLayer (T (MultiC :. c))) = V.Vector (c R)
     newtype Trace (RunLayer (T (MultiC :. c))) = TTraceM (V.Vector (Trace (RunLayer (T (SinglC :. c)))))
-    forwardT (Activation ac) !inp = TTraceM $ V.map (forwardT (Activation ac)) inp
+    forwardT (Activation ac) !inp =
+      TTraceM <$> V.mapM (forwardT (Activation ac)) inp
     output (TTraceM a) = V.map output a
-    backward a@(Activation ac) (TTraceM ts) !odelta r = (a, V.zipWith (\t d -> snd $ backward (Activation ac) t d r) ts odelta)
+    backward a@(Activation ac) (TTraceM ts) !odelta r = do
+      idelta <- V.zipWithM (\t d -> snd <$> backward (Activation ac) t d r) ts odelta
+      return (a, idelta)
 
 instance (Container c R) => Component (RunLayer (T (SinglC :. c))) where
+    type Run (RunLayer (T (SinglC :. c))) = Identity
     type Inp (RunLayer (T (SinglC :. c))) = c R
     type Out (RunLayer (T (SinglC :. c))) = c R
     newtype Trace (RunLayer (T (SinglC :. c))) = TTraceS (c R, c R)
-    forwardT (Activation (af,_)) !inp = TTraceS (inp, cmap af inp)
+    forwardT (Activation (af,_)) !inp = return $ TTraceS (inp, cmap af inp)
     output (TTraceS (_,!a)) = a
-    backward a@(Activation (_,ag)) (TTraceS (!iv,_)) !odelta _ = (a, odelta `hadamard` cmap ag iv)
+    backward a@(Activation (_,ag)) (TTraceS (!iv,_)) !odelta _ = return $ (a, odelta `hadamard` cmap ag iv)
 
 newFLayer :: Int                -- number of input values
           -> Int                -- number of neurons (output values)

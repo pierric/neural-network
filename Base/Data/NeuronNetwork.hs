@@ -1,10 +1,12 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE MultiParamTypeClasses, FunctionalDependencies #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FlexibleContexts #-}
 module Data.NeuronNetwork (
   Component(..),
   learn,
   Backend(..),
+  RunInEnv(..),
   (:++)(..),
   SpecIn1D(..),
   SpecIn2D(..),
@@ -17,6 +19,7 @@ module Data.NeuronNetwork (
 import Data.Constraint
 
 class Component a where
+  type Run a :: * -> *
   -- the input and in-error are typed by 'Inp a'
   type Inp a
   -- the output and out-error are typed by 'Out a'
@@ -28,27 +31,27 @@ class Component a where
   -- Forward propagation
   -- input: layer, input value
   -- output: a trace
-  forwardT :: a -> Inp a -> Trace a
+  forwardT :: a -> Inp a -> Run a (Trace a)
   -- Forward propagation
   -- input: layer, input value
   -- output: the final activated value.
-  forward  :: a -> Inp a -> Out a
-  forward a = output . forwardT a
+  forward  :: Applicative (Run a) => a -> Inp a -> Run a (Out a)
+  forward a = (output <$>) . forwardT a
   -- extract the final activated value from the trace
   output   :: Trace a -> Out a
   -- input:  old layer, a trace, out-error, learning rate
   -- output: new layer, in-error
-  backward :: a -> Trace a -> Out a -> Float -> (a, Inp a)
+  backward :: a -> Trace a -> Out a -> Float -> Run a (a, Inp a)
 
-learn :: Component n
+learn :: (Component n, Monad (Run n))
     => (Out n -> Out n -> Out n)  -- derivative of the error function
     -> Float                      -- learning rate
     -> n                          -- neuron network
     -> (Inp n, Out n)             -- input and expect output
-    -> n                          -- updated network
-learn cost rate n (i,o) =
-    let tr = forwardT n i
-    in fst $ backward n tr (cost (output tr) o) rate
+    -> Run n n                    -- updated network
+learn cost rate n (i,o) = do
+    tr <- forwardT n i
+    fst <$> backward n tr (cost (output tr) o) rate
 
 data SpecIn1D          = In1D Int
 data SpecIn2D          = In2D Int Int
@@ -63,5 +66,8 @@ data a :++ b = a :++ b
 class Backend b s where
   type Env b :: * -> *
   type ConvertFromSpec s :: *
-  witness :: b -> s -> Dict (Monad (Env b), Component (ConvertFromSpec s))
+  witness :: b -> s -> Dict (Monad (Env b), Monad (Run (ConvertFromSpec s)), Component (ConvertFromSpec s), RunInEnv (Run (ConvertFromSpec s))  (Env b))
   compile :: b -> s -> Env b (ConvertFromSpec s)
+
+class RunInEnv r e where
+  run :: r a -> e a

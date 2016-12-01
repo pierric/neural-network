@@ -12,6 +12,7 @@ import Data.NeuronNetwork.Backend.HMatrix.Utils
 import Data.NeuronNetwork.Backend.HMatrix.Layers
 import Numeric.LinearAlgebra (Vector, Matrix)
 import Control.Monad.Except
+import Data.Functor.Identity
 
 data ErrCode = ErrMismatch
 type Err     = ExceptT ErrCode IO
