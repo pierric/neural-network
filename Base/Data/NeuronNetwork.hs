@@ -66,8 +66,11 @@ data a :++ b = a :++ b
 class Backend b s where
   type Env b :: * -> *
   type ConvertFromSpec s :: *
-  witness :: b -> s -> Dict (Monad (Env b), Monad (Run (ConvertFromSpec s)), Component (ConvertFromSpec s), RunInEnv (Run (ConvertFromSpec s))  (Env b))
+  witness :: b -> s -> Dict ( Monad (Env b)
+                            , Monad (Run (ConvertFromSpec s))
+                            , Component (ConvertFromSpec s)
+                            , RunInEnv (Run (ConvertFromSpec s)) (Env b))
   compile :: b -> s -> Env b (ConvertFromSpec s)
 
-class RunInEnv r e where
+class (Monad r, Monad e) => RunInEnv r e where
   run :: r a -> e a

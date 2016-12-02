@@ -34,6 +34,9 @@ instance (TranslateBody s, Component (RunLayer (SpecToTag s))) =>
   type ConvertFromSpec (SpecIn2D :++ s) = RunLayer (SpecToTag s)
   compile _ (a :++ l)= trans (size Nothing a) l
 
+instance RunInEnv Identity Err where
+  run = return . runIdentity
+
 -- It is necessary to propagate the size along the layers,
 -- because fullconnect and convolution need to know
 -- the previous size.

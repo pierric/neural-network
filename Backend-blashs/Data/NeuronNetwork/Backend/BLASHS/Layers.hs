@@ -15,8 +15,22 @@ import Data.NeuronNetwork.Backend.BLASHS.Utils
 type R = Float
 type M = IO
 
+-- We parameterise the activation layer T, where the parameter indicates how
+-- elements are contained:
+--   SinglC :. Vector, SinglC :. Matrix, MultiC :. Vector, MultiC :.  Matrix
+-- SinglC means the input has only one channel, while
+-- MultiC means the input has more than one.
+--
+-- type function composition
+data (f :: * -> *) :. (g :: * -> *) :: * -> *
+-- type function: Identity
+data SinglC :: * -> *
+data MultiC :: * -> *
+
 -- Tags for each form of layer
 data F
+data A
+data T (c :: * -> *)
 data S a b
 
 data RunLayer :: * -> * where
@@ -26,6 +40,15 @@ data RunLayer :: * -> * where
   -- weights: matrix of size m x n
   -- biases:  vector of size n
   Full :: !(DenseMatrix R) -> !(DenseVector R) -> RunLayer F
+  -- Reshape from channels of matrix to a single vector
+  -- input:  m channels of 2D matrices
+  --         assuming that all matrices are of the same size a x b
+  -- output: 1D vector of the concatenation of all input channels
+  --         its size: m x a x b
+  As1D  :: RunLayer A
+  -- Activator
+  -- the input can be either a 1D vector, 2D matrix, or channels of either.
+  Activation :: (R->R, R->R) -> RunLayer (T c)
   -- stacking two components a and b
   -- the output of a should matches the input of b
   Stack :: !(RunLayer a) -> !(RunLayer b) -> RunLayer (S a b)
@@ -36,49 +59,84 @@ instance Component (RunLayer F) where
     type Out (RunLayer F) = DenseVector R
     -- trace is (input, weighted-sum)
     newtype Trace (RunLayer F) = DTrace (DenseVector R, DenseVector R)
-    forwardT (Full w b) !inp = do
-        bv <- newDenseVector (size b)
-        bv << inp :<# w
-        bv << bv :.+ b
+    forwardT (Full !w !b) !inp = do
+        bv <- newDenseVectorCopy b
+        bv <<+ inp :<# w
         return $ DTrace (inp,bv)
     output (DTrace (_,!a)) = a
-    backward (Full w b) (DTrace (!iv,!bv)) !odelta rate =
-        let !d = scale (negate rate) odelta
-            !m = iv `outer` d
-            -- back-propagated error at input
-            !idelta = w #> odelta
-            -- update to weights
-            ---- for what reason, could this expression: w `add` (iv `outer` d)
-            ---- entails a huge space leak? especially, neither 'seq' nor
-            ---- 'deepseq' helps a bit. The only workaround is to expand the
-            ---- add function, and call SV.force on the result vector, which
-            ---- explcitly copy and drop reference to orignal computed result.
-            !w'= w `add` m
-            -- !w'= let (r,c) = size w
-            --          dat1 = flatten (tr' w)
-            --          dat2 = flatten (tr' m)
-            --      in matrixFromVector ColumnMajor r c $ SV.force $ dat1 `add` dat2
-            !b'= b `add` d
-            -- !b'= SV.force $ b `add` d
-        in (Full w' b', idelta)
+    backward (Full !w !b) (DTrace (!iv,!bv)) !odelta rate = do
+        -- back-propagated error at input
+        idelta <- newDenseVector (fst $ size w)
+        idelta <<= w :#> odelta
+        -- odelta is not used any more, so we reuse it for an intermediate value.
+        odelta <<= Scale (negate rate)
+        w <<+ iv :## odelta
+        b <<= b  :.+ odelta
+        return (Full w b, idelta)
+
+instance Component (RunLayer A) where
+  type Run (RunLayer A) = IO
+  type Inp (RunLayer A) = V.Vector (DenseMatrix R)
+  type Out (RunLayer A) = DenseVector R
+  -- trace keeps information of (m, a, b, output)
+  newtype Trace (RunLayer A) = ReshapeTrace (Int, Int, Int, DenseVector R)
+  forwardT _ !inp = do
+    let !b = V.length inp
+        (!r,!c) = size (V.head inp)
+    o <- concatV $ map m2v $ V.toList inp
+    return $ ReshapeTrace (b, r, c, o)
+  output (ReshapeTrace (_,_,_,a)) = a
+  backward a (ReshapeTrace (b,r,c,_)) !odelta _ =
+    let !idelta = V.map (v2m r c) $ splitV b (r*c) odelta
+    in return $ (a, idelta)
 
 instance (Component (RunLayer a),
           Component (RunLayer b),
+          Run (RunLayer a) ~ IO,
+          Run (RunLayer b) ~ IO,
           Out (RunLayer a) ~ Inp (RunLayer b)
          ) => Component (RunLayer (S a b)) where
     type Run (RunLayer (S a b)) = IO
     type Inp (RunLayer (S a b)) = Inp (RunLayer a)
     type Out (RunLayer (S a b)) = Out (RunLayer b)
     newtype Trace (RunLayer (S a b)) = TTrace (Trace (RunLayer b), Trace (RunLayer a))
-    forwardT (Stack a b) !i =
-        let !tra = forwardT a i
-            !trb = forwardT b (output tra)
-        in TTrace (trb, tra)
+    forwardT (Stack a b) !i = do
+        !tra <- forwardT a i
+        !trb <- forwardT b (output tra)
+        return $ TTrace (trb, tra)
     output (TTrace !a) = output (fst a)
-    backward (Stack a b) (TTrace (!trb,!tra)) !odelta rate =
-        let (b', !odelta') = backward b trb odelta  rate
-            (a', !idelta ) = backward a tra odelta' rate
-        in (Stack a' b', idelta)
+    backward (Stack a b) (TTrace (!trb,!tra)) !odeltb rate = do
+        (b', !odelta) <- backward b trb odeltb rate
+        (a', !idelta) <- backward a tra odelta rate
+        return (Stack a' b', idelta)
+
+instance Component (RunLayer (T (MultiC :. c))) where
+    type Run (RunLayer (T (MultiC :. c))) = IO
+    type Inp (RunLayer (T (MultiC :. c))) = V.Vector (c R)
+    type Out (RunLayer (T (MultiC :. c))) = V.Vector (c R)
+    newtype Trace (RunLayer (T (MultiC :. c))) = TTraceM (V.Vector (Trace (RunLayer (T (SinglC :. c)))))
+    forwardT (Activation ac) !inp =
+      TTraceM <$> V.mapM (forwardT (Activation ac)) inp
+    output (TTraceM a) = V.map output a
+    backward a@(Activation ac) (TTraceM ts) !odelta r = do
+      idelta <- V.zipWithM (\t d -> snd <$> backward (Activation ac) t d r) ts odelta
+      return (a, idelta)
+
+instance Component (RunLayer (T (SinglC :. c))) where
+    type Run (RunLayer (T (SinglC :. c))) = IO
+    type Inp (RunLayer (T (SinglC :. c))) = c R
+    type Out (RunLayer (T (SinglC :. c))) = c R
+    newtype Trace (RunLayer (T (SinglC :. c))) = TTraceS (c R, c R)
+    forwardT (Activation (af,_)) !inp = do
+      out <- newDenseVectorCopy inp
+      out <<= Apply af
+      return $ TTraceS (inp, out)
+    output (TTraceS (_,!a)) = a
+    backward a@(Activation (_,ag)) (TTraceS (!iv,_)) !odelta _ = do
+      idelta <- newDenseVectorCopy iv
+      idelta <<= Apply ag
+      idelta <<= odelta :.* idelta
+      return $ (a, idelta)
 
 newFLayer :: Int                -- number of input values
           -> Int                -- number of neurons (output values)
@@ -88,8 +146,8 @@ newFLayer m n =
         -- we build the weights in column major because in the back-propagation
         -- algo, the computed update to weights is in column major. So it is
         -- good for performance to keep the matrix always in column major.
-        w <- buildMatrix (normal 0 0.01 gen) ColumnMajor (m,n)
-        b <- return $ konst 1 n
+        w <- newDenseMatrixByGen (double2Float <$> normal 0 0.01 gen) m n
+        b <- newDenseMatrixConst n 1
         return $ Full w b
 
 relu, relu' :: R-> R

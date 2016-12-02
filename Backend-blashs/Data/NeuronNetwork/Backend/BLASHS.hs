@@ -46,10 +46,6 @@ instance ComputeSize SpecReshape2DAs1D where
   size (Just (D2 k m n)) _ = D1 (k*m*n)
 instance ComputeSize SpecFullConnect where
   size _ (FullConnect n)   = D1 n
-instance ComputeSize SpecConvolution where
-  size (Just (D2 _ m n)) (Convolution k f p) = D2 k (m+2*p-f+1) (n+2*p-f+1)
-instance ComputeSize SpecMaxPooling where
-  size (Just (D2 k m n)) (MaxPooling s) = D2 k (m `div` s) (n `div` s)
 
 -- translate the body of specification
 class TranslateBody s where
@@ -57,26 +53,15 @@ class TranslateBody s where
   trans :: Size -> s -> Err (RunLayer (SpecToTag s))
 
 instance TranslateBody SpecFullConnect where
-  type SpecToTag SpecFullConnect = S F (T (SinglC :. Vector))
+  type SpecToTag SpecFullConnect = S F (T (SinglC :. DenseVector))
   trans (D1 s) (FullConnect n) = do u <- lift $ newFLayer s n
                                     return $ Stack u (Activation (relu, relu'))
-  trans _ _ = throwError ErrMismatch
-
-instance TranslateBody SpecConvolution where
-  type SpecToTag SpecConvolution = S C (T (MultiC :. Matrix))
-  trans (D2 k s t) (Convolution n f p) = do u <- lift $ newCLayer k n f p
-                                            return $ Stack u (Activation (relu, relu'))
   trans _ _ = throwError ErrMismatch
 
 instance TranslateBody SpecReshape2DAs1D where
   type SpecToTag SpecReshape2DAs1D = A
   trans (D2 _ _ _) _ = return As1D
   trans (D1 _)     _ = throwError ErrMismatch
-
-instance TranslateBody SpecMaxPooling where
-  type SpecToTag SpecMaxPooling = M
-  trans (D2 _ _ _) (MaxPooling n) = return (MaxP n)
-  trans (D1 _)     _              = throwError ErrMismatch
 
 instance (TranslateBody a, TranslateBody c, ComputeSize a) => TranslateBody (a :++ c) where
   type SpecToTag (a :++ b) = S (SpecToTag a) (SpecToTag b)
