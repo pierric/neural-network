@@ -5,6 +5,8 @@
 module Data.NeuronNetwork (
   Component(..),
   learn,
+  relu, relu',
+  cost',
   Backend(..),
   RunInEnv(..),
   (:++)(..),
@@ -44,14 +46,24 @@ class Component a where
   backward :: a -> Trace a -> Out a -> Float -> Run a (a, Inp a)
 
 learn :: (Component n, Monad (Run n))
-    => (Out n -> Out n -> Out n)  -- derivative of the error function
-    -> Float                      -- learning rate
-    -> n                          -- neuron network
-    -> (Inp n, Out n)             -- input and expect output
-    -> Run n n                    -- updated network
+    => (Out n -> Out n -> Run n (Out n))  -- derivative of the error function
+    -> Float                              -- learning rate
+    -> n                                  -- neuron network
+    -> (Inp n, Out n)                     -- input and expect output
+    -> Run n n                            -- updated network
 learn cost rate n (i,o) = do
     tr <- forwardT n i
-    fst <$> backward n tr (cost (output tr) o) rate
+    er <- cost (output tr) o
+    fst <$> backward n tr er rate
+
+relu, relu' :: (Num a, Ord a) => a -> a
+relu = max 0
+relu' x | x < 0     = 0
+        | otherwise = 1
+
+cost' :: (Num a, Ord a) => a -> a -> a
+cost' a y | y == 1 && a >= y = 0
+          | otherwise        = a - y
 
 data SpecIn1D          = In1D Int
 data SpecIn2D          = In2D Int Int

@@ -17,20 +17,13 @@ type M = IO
 
 -- We parameterise the activation layer T, where the parameter indicates how
 -- elements are contained:
---   SinglC :. Vector, SinglC :. Matrix, MultiC :. Vector, MultiC :.  Matrix
--- SinglC means the input has only one channel, while
--- MultiC means the input has more than one.
---
--- type function composition
-data (f :: * -> *) :. (g :: * -> *) :: * -> *
--- type function: Identity
-data SinglC :: * -> *
-data MultiC :: * -> *
+data SinglVec
+data MultiMat
 
 -- Tags for each form of layer
 data F
 data A
-data T (c :: * -> *)
+data T c
 data S a b
 
 data RunLayer :: * -> * where
@@ -87,7 +80,7 @@ instance Component (RunLayer A) where
     return $ ReshapeTrace (b, r, c, o)
   output (ReshapeTrace (_,_,_,a)) = a
   backward a (ReshapeTrace (b,r,c,_)) !odelta _ =
-    let !idelta = V.map (v2m r c) $ splitV b (r*c) odelta
+    let !idelta = V.fromList $ map (v2m r c) $ splitV b (r*c) odelta
     in return $ (a, idelta)
 
 instance (Component (RunLayer a),
@@ -110,23 +103,11 @@ instance (Component (RunLayer a),
         (a', !idelta) <- backward a tra odelta rate
         return (Stack a' b', idelta)
 
-instance Component (RunLayer (T (MultiC :. c))) where
-    type Run (RunLayer (T (MultiC :. c))) = IO
-    type Inp (RunLayer (T (MultiC :. c))) = V.Vector (c R)
-    type Out (RunLayer (T (MultiC :. c))) = V.Vector (c R)
-    newtype Trace (RunLayer (T (MultiC :. c))) = TTraceM (V.Vector (Trace (RunLayer (T (SinglC :. c)))))
-    forwardT (Activation ac) !inp =
-      TTraceM <$> V.mapM (forwardT (Activation ac)) inp
-    output (TTraceM a) = V.map output a
-    backward a@(Activation ac) (TTraceM ts) !odelta r = do
-      idelta <- V.zipWithM (\t d -> snd <$> backward (Activation ac) t d r) ts odelta
-      return (a, idelta)
-
-instance Component (RunLayer (T (SinglC :. c))) where
-    type Run (RunLayer (T (SinglC :. c))) = IO
-    type Inp (RunLayer (T (SinglC :. c))) = c R
-    type Out (RunLayer (T (SinglC :. c))) = c R
-    newtype Trace (RunLayer (T (SinglC :. c))) = TTraceS (c R, c R)
+instance Component (RunLayer (T SinglVec)) where
+    type Run (RunLayer (T SinglVec)) = IO
+    type Inp (RunLayer (T SinglVec)) = DenseVector R
+    type Out (RunLayer (T SinglVec)) = DenseVector R
+    newtype Trace (RunLayer (T SinglVec)) = TTraceS (DenseVector R, DenseVector R)
     forwardT (Activation (af,_)) !inp = do
       out <- newDenseVectorCopy inp
       out <<= Apply af
@@ -149,11 +130,3 @@ newFLayer m n =
         w <- newDenseMatrixByGen (double2Float <$> normal 0 0.01 gen) m n
         b <- newDenseMatrixConst n 1
         return $ Full w b
-
-relu, relu' :: R-> R
-relu = max 0
-relu' x | x < 0     = 0
-        | otherwise = 1
-
-cost' a y | y == 1 && a >= y = 0
-          | otherwise        = a - y

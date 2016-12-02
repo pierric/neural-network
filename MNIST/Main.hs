@@ -23,7 +23,7 @@ main = do x <- runExceptT body
 
   where
     body = do
-      cnn <- compile ByHmatrix (In2D 28 28 :++ Convolution 1 7 3 :++ Reshape2DAs1D :++ FullConnect 128 :++ FullConnect 10)
+      cnn <- compile ByHmatrix (In2D 28 28 :++ Reshape2DAs1D :++ FullConnect 128 :++ FullConnect 10)
       liftIO $ putStrLn "Load training data."
       dataset <- liftIO $ uncurry zip <$> trainingData
       liftIO $ putStrLn "Load test data."
@@ -46,8 +46,9 @@ online :: (Component n, Inp n ~ Image, Out n ~ Label, MonadIO m, RunInEnv (Run n
 online ds !nn = walk ds nn
   where
     walk []     !nn = return nn
-    walk (d:ds) !nn = do !nn <- run $ learn (zipVectorWith cost') 0.0010 nn d
+    walk (d:ds) !nn = do !nn <- run $ learn outcost' 0.0010 nn d
                          walk ds nn
+    outcost' a b = return $ zipVectorWith cost' a b
 
 iterateM :: (MonadIO m) => Int -> (a -> m a) -> a -> m a
 iterateM n f x = walk 0 x

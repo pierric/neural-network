@@ -18,5 +18,6 @@ cabal-version:       >=1.10
 library
   exposed-modules:     Data.NeuronNetwork.Backend.BLASHS
   other-modules:       Data.NeuronNetwork.Backend.BLASHS.Layers
+                       Data.NeuronNetwork.Backend.BLASHS.Utils
   build-depends:       base, blas-hs, mwc-random, mtl, vector, deepseq, neural-network-base
   default-language:    Haskell2010

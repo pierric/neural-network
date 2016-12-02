@@ -272,14 +272,6 @@ layerConv2 p k m = c_conv2d_s k padded
     padded = zeroPadded p m
     (w,_)  = size k
 
-relu, relu' :: R-> R
-relu = max 0
-relu' x | x < 0     = 0
-        | otherwise = 1
-
-cost' a y | y == 1 && a >= y = 0
-          | otherwise        = a - y
-
 -- max pool, picking out the maximum element
 -- in each stride x stride sub-matrices.
 -- assuming that the original matrix row and column size are
