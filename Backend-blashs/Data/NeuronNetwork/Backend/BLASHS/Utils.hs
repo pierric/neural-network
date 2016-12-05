@@ -38,24 +38,24 @@ newDenseMatrixByGen g nr nc = do
 v2m r c (DenseVector v) = DenseMatrix r c v
 m2v (DenseMatrix _ _ v) = DenseVector v
 
-toListV (DenseVector vs) = SV.unsafeFreeze vs >>= return . SV.toList
+toListV (DenseVector vs) = SV.freeze vs >>= return . SV.toList
 
 concatV :: V.Storable a => [DenseVector a] -> IO (DenseVector a)
 concatV vs = do
   let sz = sum $ map (\(DenseVector v) -> V.length v) vs
-  rv <- V.unsafeNew sz
+  rv <- V.new sz
   go rv vs
   return $ DenseVector rv
   where
     go vt [] = assert (V.length vt == 0) $ return ()
     go vt (DenseVector vs:vss) = assert (V.length vt >= V.length vs) $ do
       let (v1, v2) = V.splitAt (V.length vs) vt
-      V.unsafeCopy v1 vs
+      V.copy v1 vs
       go v2 vss
 
 splitV :: V.Storable a => Int -> Int -> DenseVector a -> [DenseVector a]
 splitV n c (DenseVector v) = assert (V.length v > n * c) $
-  [DenseVector (V.unsafeSlice (i*c) c v) | i <- [0..n-1]]
+  [DenseVector (V.slice (i*c) c v) | i <- [0..n-1]]
 
 class Size a where
   type Dim a
@@ -96,12 +96,14 @@ class AssignTo c a where
 
 instance (Numeric a, V.Storable a) => AssignTo DenseVector a where
   (DenseVector v) <<= (DenseVector x :<# DenseMatrix r c y) =
+    assert (V.length x == r && V.length v == c) $
     V.unsafeWith v (\pv ->
     V.unsafeWith x (\px ->
     V.unsafeWith y (\py ->
       gemv RowMajor Trans r c 1.0 py c px 1 0.0 pv 1)))
 
   (DenseVector v) <<= (DenseMatrix r c x :#> DenseVector y) =
+    assert (V.length y == c && V.length v == r) $
     V.unsafeWith v (\pv ->
     V.unsafeWith x (\px ->
     V.unsafeWith y (\py ->
@@ -139,12 +141,14 @@ instance (Numeric a, V.Storable a) => AssignTo DenseVector a where
                              go (i+1)
 
   (DenseVector v) <<+ (DenseVector x :<# DenseMatrix r c y) =
+    assert (V.length x == r && V.length v == c) $
     V.unsafeWith v (\pv ->
     V.unsafeWith x (\px ->
     V.unsafeWith y (\py ->
       gemv RowMajor Trans r c 1.0 py c px 1 1.0 pv 1)))
 
   (DenseVector v) <<+ (DenseMatrix r c x :#> DenseVector y) =
+    assert (V.length y == c && V.length v == r) $
     V.unsafeWith v (\pv ->
     V.unsafeWith x (\px ->
     V.unsafeWith y (\py ->
@@ -178,12 +182,12 @@ instance (Numeric a, V.Storable a) => AssignTo DenseMatrix a where
 
 
 hadamard :: (V.Storable a, Num a) => (a -> a -> a) -> V.IOVector a -> V.IOVector a -> V.IOVector a -> IO ()
-hadamard op v x y = go 0
+hadamard op v x y = assert (V.length x == sz && V.length y == sz) $ go 0
   where
     sz = V.length v
     go !i = if (i == sz)
               then return ()
-              else do a <- V.unsafeRead x i
-                      b <- V.unsafeRead y i
-                      V.unsafeWrite v i (op a b)
+              else do a <- V.read x i
+                      b <- V.read y i
+                      V.write v i (op a b)
                       go (i+1)
