@@ -16,7 +16,7 @@ newtype DenseVector a = DenseVector (V.IOVector a)
 data DenseMatrix a = DenseMatrix Int Int (V.IOVector a)
 
 newDenseVector :: V.Storable a => Int -> IO (DenseVector a)
-newDenseVector sz = DenseVector <$> V.new sz
+newDenseVector sz = DenseVector <$> V.unsafeNew sz
 
 newDenseVectorCopy :: V.Storable a => DenseVector a -> IO (DenseVector a)
 newDenseVectorCopy (DenseVector v) = V.clone v >>= return . DenseVector
@@ -25,7 +25,7 @@ newDenseVectorConst:: V.Storable a => Int -> a -> IO (DenseVector a)
 newDenseVectorConst n v = V.replicate n v >>= return . DenseVector
 
 newDenseMatrix :: V.Storable a => Int -> Int -> IO (DenseMatrix a)
-newDenseMatrix r c = DenseMatrix r c <$> V.new (r*c)
+newDenseMatrix r c = DenseMatrix r c <$> V.unsafeNew (r*c)
 
 newDenseMatrixConst:: V.Storable a => Int -> a -> IO (DenseVector a)
 newDenseMatrixConst n v = V.replicate n v >>= return . DenseVector
@@ -38,24 +38,24 @@ newDenseMatrixByGen g nr nc = do
 v2m r c (DenseVector v) = DenseMatrix r c v
 m2v (DenseMatrix _ _ v) = DenseVector v
 
-toListV (DenseVector vs) = SV.freeze vs >>= return . SV.toList
+toListV (DenseVector vs) = SV.unsafeFreeze vs >>= return . SV.toList
 
 concatV :: V.Storable a => [DenseVector a] -> IO (DenseVector a)
 concatV vs = do
   let sz = sum $ map (\(DenseVector v) -> V.length v) vs
-  rv <- V.new sz
+  rv <- V.unsafeNew sz
   go rv vs
   return $ DenseVector rv
   where
     go vt [] = assert (V.length vt == 0) $ return ()
     go vt (DenseVector vs:vss) = assert (V.length vt >= V.length vs) $ do
       let (v1, v2) = V.splitAt (V.length vs) vt
-      V.copy v1 vs
+      V.unsafeCopy v1 vs
       go v2 vss
 
 splitV :: V.Storable a => Int -> Int -> DenseVector a -> [DenseVector a]
 splitV n c (DenseVector v) = assert (V.length v > n * c) $
-  [DenseVector (V.slice (i*c) c v) | i <- [0..n-1]]
+  [DenseVector (V.unsafeSlice (i*c) c v) | i <- [0..n-1]]
 
 class Size a where
   type Dim a
@@ -107,7 +107,7 @@ instance (Numeric a, V.Storable a) => AssignTo DenseVector a where
     V.unsafeWith v (\pv ->
     V.unsafeWith x (\px ->
     V.unsafeWith y (\py ->
-      gemv RowMajor NoTrans r c 1.0 py c px 1 0.0 pv 1)))
+      gemv RowMajor NoTrans r c 1.0 px c py 1 0.0 pv 1)))
 
   (DenseVector v) <<= (DenseVector x :.* DenseVector y) =
     let sz = V.length v
@@ -187,7 +187,7 @@ hadamard op v x y = assert (V.length x == sz && V.length y == sz) $ go 0
     sz = V.length v
     go !i = if (i == sz)
               then return ()
-              else do a <- V.read x i
-                      b <- V.read y i
-                      V.write v i (op a b)
+              else do a <- V.unsafeRead x i
+                      b <- V.unsafeRead y i
+                      V.unsafeWrite v i (op a b)
                       go (i+1)
