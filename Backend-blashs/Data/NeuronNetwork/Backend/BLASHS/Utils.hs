@@ -152,7 +152,7 @@ instance (Numeric a, V.Storable a) => AssignTo DenseVector a where
     V.unsafeWith v (\pv ->
     V.unsafeWith x (\px ->
     V.unsafeWith y (\py ->
-      gemv RowMajor NoTrans r c 1.0 py c px 1 1.0 pv 1)))
+      gemv RowMajor NoTrans r c 1.0 px c py 1 1.0 pv 1)))
 
 instance (Numeric a, V.Storable a) => AssignTo DenseMatrix a where
   (DenseMatrix vr vc v) <<= (DenseMatrix xr xc x :.* DenseMatrix yr yc y) =
@@ -177,9 +177,7 @@ instance (Numeric a, V.Storable a) => AssignTo DenseMatrix a where
        V.unsafeWith v (\pv ->
        V.unsafeWith x (\px ->
        V.unsafeWith y (\py ->
-         geru RowMajor m n 1.0 px 1 py 1 pv vc)))
-
-
+         geru RowMajor m n 1.0 px 1 py 1 pv n)))
 
 hadamard :: (V.Storable a, Num a) => (a -> a -> a) -> V.IOVector a -> V.IOVector a -> V.IOVector a -> IO ()
 hadamard op v x y = assert (V.length x == sz && V.length y == sz) $ go 0
