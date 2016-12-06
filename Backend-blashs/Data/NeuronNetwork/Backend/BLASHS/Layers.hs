@@ -8,7 +8,6 @@ import Control.Monad.ST
 import Control.Monad (liftM2, forM_, when)
 import GHC.Float
 import Data.STRef
-import Control.DeepSeq
 import Data.NeuronNetwork
 import Data.NeuronNetwork.Backend.BLASHS.Utils
 
@@ -22,6 +21,7 @@ data MultiMat
 
 -- Tags for each form of layer
 data F
+data C
 data A
 data T c
 data S a b
@@ -33,6 +33,15 @@ data RunLayer :: * -> * where
   -- weights: matrix of size m x n
   -- biases:  vector of size n
   Full :: !(DenseMatrix R) -> !(DenseVector R) -> RunLayer F
+  -- convolutional layer
+  -- input:  channels of 2D floats, of the same size (a x b), # of input channels:  m
+  -- output: channels of 2D floats, of the same size (c x d), # of output channels: n
+  --         where c = a + 2*padding + 1 - s
+  --               d = b + 2*padding + 1 - t
+  -- feature:  matrix of (s x t), # of features: m x n
+  -- padding:  number of 0s padded at each side of channel
+  -- biases:   bias for each output, # of biases: n
+  Conv  :: !(V.Vector (V.Vector (DenseMatrix R))) -> !(V.Vector R) -> Int -> RunLayer C
   -- Reshape from channels of matrix to a single vector
   -- input:  m channels of 2D matrices
   --         assuming that all matrices are of the same size a x b
@@ -82,6 +91,31 @@ instance Component (RunLayer A) where
   backward a (ReshapeTrace (b,r,c,_)) !odelta _ =
     let !idelta = V.fromList $ map (v2m r c) $ splitV b (r*c) odelta
     in return $ (a, idelta)
+
+instance Component (RunLayer C) where
+  type Run (RunLayer C) = IO
+  type Inp (RunLayer C) = V.Vector (DenseMatrix R)
+  type Out (RunLayer C) = V.Vector (DenseMatrix R)
+  -- trace is (input, convoluted output)
+  newtype Trace (RunLayer C) = CTrace (Inp (RunLayer C), Out (RunLayer C))
+  forwardT (Conv fs bs pd) !inp = do
+    ov <- V.zipWithM feature (tr fs) bs
+    return $ CTrace (inp, ov)
+    where
+      -- transpose the features matrix
+      tr :: V.Vector (V.Vector a) -> V.Vector (V.Vector a)
+      tr uv = let n   = V.length (V.head uv)
+                  !vu = V.map (\i -> V.map (V.! i) uv) $ V.enumFromN 0 n
+              in vu
+      (outr,outc) = let (x,y) = size (V.head inp)
+                        (u,v) = size (V.head $ V.head fs)
+                    in (x+2*pd-u+1, y+2*pd-v+1)
+      feature :: V.Vector (DenseMatrix R) -> R -> Run (RunLayer C) (DenseMatrix R)
+      feature f b = do
+        mat <- newDenseMatrix outr outc
+        V.zipWithM_ (\a b -> corr2 pd a b (mat <<+)) f inp
+        mat <<= Apply (+ b)
+        return mat
 
 instance (Component (RunLayer a),
           Component (RunLayer b),

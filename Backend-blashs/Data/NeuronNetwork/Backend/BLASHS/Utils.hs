@@ -8,6 +8,7 @@ import Blas.Primitive.Types
 import qualified Data.Vector.Storable as SV
 import qualified Data.Vector.Storable.Mutable as V
 import Control.Exception
+import Control.Monad
 
 -- mutable vector type
 newtype DenseVector a = DenseVector (V.IOVector a)
@@ -57,6 +58,17 @@ splitV :: V.Storable a => Int -> Int -> DenseVector a -> [DenseVector a]
 splitV n c (DenseVector v) = assert (V.length v > n * c) $
   [DenseVector (V.unsafeSlice (i*c) c v) | i <- [0..n-1]]
 
+sliceM :: V.Storable a => DenseMatrix a -> (Int, Int) -> DenseVector a
+sliceM (DenseMatrix r c d) (x,y) = assert (x>=0 && x<r && y>=0 && y<c) $ DenseVector v
+  where
+    v = V.unsafeDrop (x*c+y) d
+
+dropV n (DenseVector v) = DenseVector (V.unsafeDrop n v)
+
+copyV (DenseVector v1) (DenseVector v2) len =
+  assert (V.length v1 >= len && V.length v2 >= len) $
+  V.unsafeCopy (V.unsafeTake len v1) (V.unsafeTake len v2)
+
 class Size a where
   type Dim a
   size :: a -> Dim a
@@ -89,6 +101,8 @@ data Op :: (* -> *) -> * -> * where
   Apply :: (a -> a) -> Op c a
   -- zip with a function
   ZipWith :: (a -> a -> a) -> c a -> c a -> Op c a
+  --
+  UnsafeV2M :: Op DenseVector a -> Op DenseMatrix a
 
 class AssignTo c a where
   (<<=) :: c a -> Op c a -> IO ()
@@ -154,6 +168,7 @@ instance (Numeric a, V.Storable a) => AssignTo DenseVector a where
     V.unsafeWith y (\py ->
       gemv RowMajor NoTrans r c 1.0 px c py 1 1.0 pv 1)))
 
+
 instance (Numeric a, V.Storable a) => AssignTo DenseMatrix a where
   (DenseMatrix vr vc v) <<= (DenseMatrix xr xc x :.* DenseMatrix yr yc y) =
     let sz = V.length v
@@ -170,6 +185,8 @@ instance (Numeric a, V.Storable a) => AssignTo DenseMatrix a where
     in assert (sz == r * c) $
        V.unsafeWith v (\pv -> scal sz s pv 1)
 
+  m <<= UnsafeV2M op = (m2v m) <<= op
+
   (DenseMatrix vr vc v) <<+ (DenseVector x :## DenseVector y) =
     let m = V.length x
         n = V.length y
@@ -178,6 +195,8 @@ instance (Numeric a, V.Storable a) => AssignTo DenseMatrix a where
        V.unsafeWith x (\px ->
        V.unsafeWith y (\py ->
          geru RowMajor m n 1.0 px 1 py 1 pv n)))
+
+  m <<+ UnsafeV2M op = (m2v m) <<+ op
 
 hadamard :: (V.Storable a, Num a) => (a -> a -> a) -> V.IOVector a -> V.IOVector a -> V.IOVector a -> IO ()
 hadamard op v x y = assert (V.length x == sz && V.length y == sz) $ go 0
@@ -189,3 +208,24 @@ hadamard op v x y = assert (V.length x == sz && V.length y == sz) $ go 0
                       b <- V.unsafeRead y i
                       V.unsafeWrite v i (op a b)
                       go (i+1)
+
+corr2 :: (V.Storable a, Numeric a)
+      => Int -> DenseMatrix a -> DenseMatrix a -> (Op DenseMatrix a -> IO b) -> IO b
+corr2 p k m fun = do
+  wrk <- newDenseMatrix (u*v) (kr*kc)
+  let cpytsk = zip [0..] [gen x y | x<-[-p,mr+p-kr], y<-[-p, mc+p-kc]]
+  forM cpytsk $ \ (wr, ts) -> do
+    let v = sliceM wrk (wr,0)
+    forM ts $ \ (ov, om, len) ->
+      copyV (dropV ov v) (sliceM m om) len
+  fun $ UnsafeV2M (wrk :#> (m2v k))
+  where
+    (kr,kc) = size k
+    (mr,mc) = size m
+    u       = mr - kr + 2*p + 1
+    v       = mc - kc + 2*p + 1
+    gen x y = [ (ov,(omx,omy), len)
+              | omx <- take kr [x..], omx >=0, omx < mr
+              , let omy = if y < 0 then 0 else y
+              , let len = if y < 0 then kc + y else if y + kc <= mc then kc else mc - y
+              , let ov  = (omx - x)*kc + omy - y ]
