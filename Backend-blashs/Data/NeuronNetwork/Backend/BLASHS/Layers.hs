@@ -116,6 +116,15 @@ instance Component (RunLayer C) where
         V.zipWithM_ (\a b -> corr2 pd a b (mat <<+)) f inp
         mat <<= Apply (+ b)
         return mat
+  output (CTrace (_,!a)) = a
+  backward (Conv fs bs pd) (CTrace (iv, av)) !odelta rate = do
+    V.zipWithM_ (\flts chn -> do
+                      -- chn:  one input channel
+                      -- flts: all features used for chn
+                      V.zipWithM_ (\f d -> do
+                        corr2 pd chn d ((f <<+) . ScaledOp (negate rate))
+                      ) flts odelta
+                    ) fs iv
 
 instance (Component (RunLayer a),
           Component (RunLayer b),
@@ -162,5 +171,5 @@ newFLayer m n =
         -- algo, the computed update to weights is in column major. So it is
         -- good for performance to keep the matrix always in column major.
         w <- newDenseMatrixByGen (double2Float <$> normal 0 0.01 gen) m n
-        b <- newDenseMatrixConst n 1
+        b <- newDenseVectorConst n 1
         return $ Full w b
