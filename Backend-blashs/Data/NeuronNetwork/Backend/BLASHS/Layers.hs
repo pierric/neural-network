@@ -119,12 +119,18 @@ instance Component (RunLayer C) where
   output (CTrace (_,!a)) = a
   backward (Conv fs bs pd) (CTrace (iv, av)) !odelta rate = do
     V.zipWithM_ (\flts chn -> do
-                      -- chn:  one input channel
-                      -- flts: all features used for chn
-                      V.zipWithM_ (\f d -> do
-                        corr2 pd chn d ((f <<+) . ScaledOp (negate rate))
-                      ) flts odelta
-                    ) fs iv
+                  -- chn:  one input channel
+                  -- flts: all features used for chn
+                  V.zipWithM_ (\f d -> corr2 pd chn d ((f <<+) . Scale' (negate rate))) flts odelta
+                ) fs iv
+    !nb <- V.zipWithM (\b d -> do s <- sumElements d
+                                  return $ b + negate rate * s
+                      ) bs odelta
+    let (ir,ic) = size (V.head iv)
+    !idelta <- V.forM fs (\f -> do mat <- newDenseMatrix ir ic
+                                   V.zipWithM_ (\f d -> conv2 pd f d (mat <<+)) f odelta
+                                   return mat)
+    return $ (Conv fs nb pd, idelta)
 
 instance (Component (RunLayer a),
           Component (RunLayer b),

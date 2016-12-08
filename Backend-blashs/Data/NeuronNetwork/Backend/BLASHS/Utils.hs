@@ -103,8 +103,9 @@ data Op :: (* -> *) -> * -> * where
   ZipWith :: (a -> a -> a) -> c a -> c a -> Op c a
   -- interpret an op to vector as an op to matrix
   UnsafeV2M :: Op DenseVector a -> Op DenseMatrix a
-  --
-  ScaledOp :: Float -> Op c a -> Op c a
+  -- scale the result of some op
+  -- especially used in convolution, where :#> is followed by scale.
+  Scale' :: a -> Op c a -> Op c a
 
 class AssignTo c a where
   (<<=) :: c a -> Op c a -> IO ()
@@ -148,7 +149,7 @@ instance (Numeric a, V.Storable a) => AssignTo DenseVector a where
                              V.write v i (f a b)
                              go (i+1)
 
-  (DenseVector v) <<= ScaledOp a (DenseMatrix r c x :#> DenseVector y) =
+  (DenseVector v) <<= Scale' a (DenseMatrix r c x :#> DenseVector y) =
     assert (V.length y == c && V.length v == r) $ gemv_helper NoTrans r c a x c y 0.0 v
 
   (DenseVector v) <<+ (DenseVector x :<# DenseMatrix r c y) =
@@ -157,9 +158,18 @@ instance (Numeric a, V.Storable a) => AssignTo DenseVector a where
   (DenseVector v) <<+ (DenseMatrix r c x :#> DenseVector y) =
     assert (V.length y == c && V.length v == r) $ gemv_helper NoTrans r c 1.0 x c y 1.0 v
 
-  (DenseVector v) <<+ ScaledOp a (DenseMatrix r c x :#> DenseVector y) =
+  (DenseVector v) <<+ Scale' a (DenseMatrix r c x :#> DenseVector y) =
     assert (V.length y == c && V.length v == r) $ gemv_helper NoTrans r c a x c y 1.0 v
 
+gemv_helper :: Numeric a
+            => Transpose
+            -> Int -> Int
+            -> a
+            -> V.IOVector a
+            -> Int
+            -> V.IOVector a
+            -> a
+            -> V.IOVector a -> IO ()
 gemv_helper trans row col alpha x lda y beta v =
   V.unsafeWith x (\px ->
   V.unsafeWith y (\py ->
@@ -180,7 +190,7 @@ instance (Numeric a, V.Storable a) => AssignTo DenseMatrix a where
 
   m <<= UnsafeV2M op = (m2v m) <<= op
 
-  m <<= ScaledOp r (UnsafeV2M op) = m <<= UnsafeV2M (ScaledOp r op)
+  m <<= Scale' r (UnsafeV2M op) = m <<= UnsafeV2M (Scale' r op)
 
   (DenseMatrix vr vc v) <<+ (DenseVector x :## DenseVector y) =
     let m = V.length x
@@ -193,7 +203,7 @@ instance (Numeric a, V.Storable a) => AssignTo DenseMatrix a where
 
   m <<+ UnsafeV2M op = (m2v m) <<+ op
 
-  m <<+ ScaledOp r (UnsafeV2M op) = m <<+ UnsafeV2M (ScaledOp r op)
+  m <<+ Scale' r (UnsafeV2M op) = m <<+ UnsafeV2M (Scale' r op)
 
 hadamard :: (V.Storable a, Num a)
          => (a -> a -> a) -> V.IOVector a -> V.IOVector a -> V.IOVector a -> IO ()
@@ -207,24 +217,45 @@ hadamard op v x y = assert (V.length x == sz && V.length y == sz) $ go 0
                       V.unsafeWrite v i (op a b)
                       go (i+1)
 
+sumElements :: (V.Storable a, Num a) => DenseMatrix a -> IO a
+sumElements (DenseMatrix r c v) = go v (r*c) 0
+  where
+    go v 0  !s = return s
+    go v !n !s = do a <- V.unsafeRead v 0
+                    go (V.unsafeTail v) (n-1) (a+s)
+
 corr2 :: (V.Storable a, Numeric a)
       => Int -> DenseMatrix a -> DenseMatrix a -> (Op DenseMatrix a -> IO b) -> IO b
 corr2 p k m fun = do
+  let (kr,kc) = size k
+      (mr,mc) = size m
+      u       = mr - kr + 2*p + 1
+      v       = mc - kc + 2*p + 1
   wrk <- newDenseMatrixConst (u*v) (kr*kc) 0
-  fill wrk
+  fill wrk p kr kc mr mc m
   fun $ UnsafeV2M (wrk :#> (m2v k))
+
+conv2 :: (V.Storable a, Numeric a)
+      => Int -> DenseMatrix a -> DenseMatrix a -> (Op DenseMatrix a -> IO b) -> IO b
+conv2 p k m fun = do
+  let (kr,kc) = size k
+      (mr,mc) = size m
+      u       = mr - kr + 2*p + 1
+      v       = mc - kc + 2*p + 1
+  wrk <- newDenseMatrixConst (u*v) (kr*kc) 0
+  fill wrk p kr kc mr mc m
+  k' <- case k of DenseMatrix _ _ v -> SV.unsafeFreeze v
+  k' <- SV.unsafeThaw (SV.reverse k')
+  fun $ UnsafeV2M (wrk :#> (DenseVector k'))
+
+fill wrk p kr kc mr mc m = do
+  let cpytsk = zip [0..] [gen x y | x<-[-p..mr+p-kr], y<-[-p..mc+p-kc]]
+  forM cpytsk $ \ (wr, ts) -> do
+    let v = sliceM wrk (wr,0)
+    forM ts $ \ (ov, om, len) -> do
+      -- putStrLn $ show (wr,ov,om,len)
+      copyV (dropV ov v) (sliceM m om) len
   where
-    (kr,kc) = size k
-    (mr,mc) = size m
-    u       = mr - kr + 2*p + 1
-    v       = mc - kc + 2*p + 1
-    fill wrk = do
-      let cpytsk = zip [0..] [gen x y | x<-[-p..mr+p-kr], y<-[-p..mc+p-kc]]
-      forM cpytsk $ \ (wr, ts) -> do
-        let v = sliceM wrk (wr,0)
-        forM ts $ \ (ov, om, len) -> do
-          -- putStrLn $ show (wr,ov,om,len)
-          copyV (dropV ov v) (sliceM m om) len
     gen x y = [ (ov,(omx,omy), len)
               | omx <- take kr [x..], omx >=0, omx < mr
               , let omy = if y < 0 then 0 else y
