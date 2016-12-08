@@ -19,7 +19,7 @@ library
   exposed-modules:     Data.NeuronNetwork.Backend.BLASHS
   other-modules:       Data.NeuronNetwork.Backend.BLASHS.Layers
                        Data.NeuronNetwork.Backend.BLASHS.Utils
-  build-depends:       base, blas-hs, mwc-random, mtl, vector, neural-network-base
+  build-depends:       base, blas-hs, mwc-random, mtl, vector, constraints, neural-network-base
   default-language:    Haskell2010
 
 test-suite s1

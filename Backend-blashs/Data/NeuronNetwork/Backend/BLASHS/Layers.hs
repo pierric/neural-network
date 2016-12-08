@@ -168,6 +168,26 @@ instance Component (RunLayer (T SinglVec)) where
       idelta <<= odelta :.* idelta
       return $ (a, idelta)
 
+instance Component (RunLayer (T MultiMat)) where
+    type Run (RunLayer (T MultiMat)) = IO
+    type Inp (RunLayer (T MultiMat)) = V.Vector (DenseMatrix R)
+    type Out (RunLayer (T MultiMat)) = V.Vector (DenseMatrix R)
+    newtype Trace (RunLayer (T MultiMat)) = TTraceM (V.Vector (DenseMatrix R), V.Vector (DenseMatrix R))
+    forwardT (Activation (af,_)) !inp = do
+      out <- V.mapM (\i -> do o <- newDenseMatrixCopy i
+                              o <<= Apply af
+                              return o
+                    ) inp
+      return $ TTraceM (inp, out)
+    output (TTraceM (_,!a)) = a
+    backward a@(Activation (_,ag)) (TTraceM (!iv,_)) !odelta _ = do
+      idelta <- V.zipWithM (\i d -> do o <- newDenseMatrixCopy i
+                                       o <<= Apply ag
+                                       o <<= d :.* o
+                                       return o
+                           ) iv odelta
+      return $ (a, idelta)
+
 newFLayer :: Int                -- number of input values
           -> Int                -- number of neurons (output values)
           -> IO (RunLayer F)    -- new layer
@@ -179,3 +199,21 @@ newFLayer m n =
         w <- newDenseMatrixByGen (double2Float <$> normal 0 0.01 gen) m n
         b <- newDenseVectorConst n 1
         return $ Full w b
+
+newCLayer :: Int                -- number of input channels
+          -> Int                -- number of output channels
+          -> Int                -- size of each feature
+          -> Int                -- size of padding
+          -> IO (RunLayer C)    -- new layer
+newCLayer inpsize outsize sfilter npadding =
+  withSystemRandom . asGenIO $ \gen -> do
+      fs <- V.replicateM inpsize $ V.replicateM outsize $
+              newDenseMatrixByGen (double2Float <$> truncNormal 0 0.1 gen) sfilter sfilter
+      bs <- return $ V.replicate outsize 0.1
+      return $ Conv fs bs npadding
+  where
+    truncNormal m s g = do
+      x <- standard g
+      if x >= 2.0 || x <= -2.0
+        then truncNormal m s g
+        else return $! m + s * x

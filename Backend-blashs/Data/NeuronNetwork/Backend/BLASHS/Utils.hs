@@ -14,7 +14,7 @@ import Control.Monad
 newtype DenseVector a = DenseVector (V.IOVector a)
 
 -- mutable matrix type
-data DenseMatrix a = DenseMatrix Int Int (V.IOVector a)
+data DenseMatrix a = DenseMatrix {-# UNPACK #-}!Int {-# UNPACK #-}!Int {-# UNPACK #-}!(V.IOVector a)
 
 newDenseVector :: V.Storable a => Int -> IO (DenseVector a)
 newDenseVector sz = DenseVector <$> V.unsafeNew sz
@@ -35,6 +35,9 @@ newDenseMatrixByGen :: IO Float -> Int -> Int -> IO (DenseMatrix Float)
 newDenseMatrixByGen g nr nc = do
   vals <- V.replicateM (nr*nc) g
   return $ DenseMatrix nr nc vals
+
+newDenseMatrixCopy :: V.Storable a => DenseMatrix a -> IO (DenseMatrix a)
+newDenseMatrixCopy (DenseMatrix r c v) = V.clone v >>= return . DenseMatrix r c
 
 v2m r c (DenseVector v) = DenseMatrix r c v
 m2v (DenseMatrix _ _ v) = DenseVector v
@@ -152,6 +155,8 @@ instance (Numeric a, V.Storable a) => AssignTo DenseVector a where
   (DenseVector v) <<= Scale' a (DenseMatrix r c x :#> DenseVector y) =
     assert (V.length y == c && V.length v == r) $ gemv_helper NoTrans r c a x c y 0.0 v
 
+  _ <<= _ = error "Unsupported Op [Vector <<=]."
+
   (DenseVector v) <<+ (DenseVector x :<# DenseMatrix r c y) =
     assert (V.length x == r && V.length v == c) $ gemv_helper Trans r c 1.0 y c x 1.0 v
 
@@ -160,6 +165,8 @@ instance (Numeric a, V.Storable a) => AssignTo DenseVector a where
 
   (DenseVector v) <<+ Scale' a (DenseMatrix r c x :#> DenseVector y) =
     assert (V.length y == c && V.length v == r) $ gemv_helper NoTrans r c a x c y 1.0 v
+
+  _ <<+ _ = error "Unsupported Op [Vector <<+]."
 
 gemv_helper :: Numeric a
             => Transpose
@@ -188,9 +195,13 @@ instance (Numeric a, V.Storable a) => AssignTo DenseMatrix a where
     in assert (sz == r * c) $
        V.unsafeWith v (\pv -> scal sz s pv 1)
 
+  (DenseMatrix r c v) <<= Apply f = (DenseVector v) <<= Apply f
+
   m <<= UnsafeV2M op = (m2v m) <<= op
 
   m <<= Scale' r (UnsafeV2M op) = m <<= UnsafeV2M (Scale' r op)
+
+  _ <<= _ = error "Unsupported Op [Matrix <<=]."
 
   (DenseMatrix vr vc v) <<+ (DenseVector x :## DenseVector y) =
     let m = V.length x
@@ -204,6 +215,8 @@ instance (Numeric a, V.Storable a) => AssignTo DenseMatrix a where
   m <<+ UnsafeV2M op = (m2v m) <<+ op
 
   m <<+ Scale' r (UnsafeV2M op) = m <<+ UnsafeV2M (Scale' r op)
+
+  _ <<+ _ = error "Unsupported Op [Matrix <<+]."
 
 hadamard :: (V.Storable a, Num a)
          => (a -> a -> a) -> V.IOVector a -> V.IOVector a -> V.IOVector a -> IO ()
@@ -250,9 +263,9 @@ conv2 p k m fun = do
 
 fill wrk p kr kc mr mc m = do
   let cpytsk = zip [0..] [gen x y | x<-[-p..mr+p-kr], y<-[-p..mc+p-kc]]
-  forM cpytsk $ \ (wr, ts) -> do
+  forM_ cpytsk $ \ (wr, ts) -> do
     let v = sliceM wrk (wr,0)
-    forM ts $ \ (ov, om, len) -> do
+    forM_ ts $ \ (ov, om, len) -> do
       -- putStrLn $ show (wr,ov,om,len)
       copyV (dropV ov v) (sliceM m om) len
   where

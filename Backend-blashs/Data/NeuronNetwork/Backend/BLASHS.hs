@@ -12,6 +12,7 @@ import Data.NeuronNetwork
 import Data.NeuronNetwork.Backend.BLASHS.Layers
 import Data.NeuronNetwork.Backend.BLASHS.Utils
 import Control.Monad.Except
+import Data.Constraint (Dict(..))
 
 data ErrCode = ErrMismatch
 type Err     = ExceptT ErrCode IO
@@ -20,18 +21,20 @@ type Err     = ExceptT ErrCode IO
 data ByBLASHS = ByBLASHS
 
 -- with 1D input
-instance (TranslateBody s, Component (RunLayer (SpecToTag s))) =>
+instance (TranslateBody s, Component (RunLayer (SpecToTag s)), Run (RunLayer (SpecToTag s)) ~ IO) =>
     Backend ByBLASHS (SpecIn1D :++ s) where
   type Env ByBLASHS = Err
   type ConvertFromSpec (SpecIn1D :++ s) = RunLayer (SpecToTag s)
   compile _ (a :++ l)= trans (lsize Nothing a) l
+  witness _ _ = Dict
 
 -- with 2D input
-instance (TranslateBody s, Component (RunLayer (SpecToTag s))) =>
+instance (TranslateBody s, Component (RunLayer (SpecToTag s)), Run (RunLayer (SpecToTag s)) ~ IO) =>
     Backend ByBLASHS (SpecIn2D :++ s) where
   type Env ByBLASHS = Err
   type ConvertFromSpec (SpecIn2D :++ s) = RunLayer (SpecToTag s)
   compile _ (a :++ l)= trans (lsize Nothing a) l
+  witness _ _ = Dict
 
 instance RunInEnv IO Err where
   run = liftIO
@@ -51,6 +54,8 @@ instance ComputeSize SpecReshape2DAs1D where
   lsize (Just (D2 k m n)) _ = D1 (k*m*n)
 instance ComputeSize SpecFullConnect where
   lsize _ (FullConnect n)   = D1 n
+instance ComputeSize SpecConvolution where
+  lsize (Just (D2 _ m n)) (Convolution k f p) = D2 k (m+2*p-f+1) (n+2*p-f+1)
 
 -- translate the body of specification
 class TranslateBody s where
@@ -61,6 +66,12 @@ instance TranslateBody SpecFullConnect where
   type SpecToTag SpecFullConnect = S F (T SinglVec)
   trans (D1 s) (FullConnect n) = do u <- lift $ newFLayer s n
                                     return $ Stack u (Activation (relu, relu'))
+  trans _ _ = throwError ErrMismatch
+
+instance TranslateBody SpecConvolution where
+  type SpecToTag SpecConvolution = S C (T MultiMat)
+  trans (D2 k s t) (Convolution n f p) = do u <- lift $ newCLayer k n f p
+                                            return $ Stack u (Activation (relu, relu'))
   trans _ _ = throwError ErrMismatch
 
 instance TranslateBody SpecReshape2DAs1D where
