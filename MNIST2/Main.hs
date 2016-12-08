@@ -14,7 +14,7 @@ import Text.PrettyPrint.Free hiding (flatten)
 import System.IO.Unsafe
 import Parser
 
-main = do x <- runExceptT $ compile ByBLASHS (In1D 768 :++ FullConnect 256 :++ FullConnect 10)
+main = do x <- runExceptT $ compile ByBLASHS (In1D 768 :++ FullConnect 128 :++ FullConnect 10)
           case x of
             Left _ -> putStrLn "Error."
             Right cnn -> debug cnn -- dotrain cnn >>= dotest
@@ -42,7 +42,7 @@ dotrain nn = do
   dataset <- trainingData >>= mapM preprocess . uncurry zip
   putStrLn "Load test data."
   putStrLn "Learning."
-  iterateM 15 (online 0.0010 dataset) nn
+  iterateM 20 (online 0.00008 dataset) nn
 
 dotest :: (Component n, Inp n ~ DenseVector Float, Out n ~ DenseVector Float, Run n ~ IO)
        => n -> IO ()
