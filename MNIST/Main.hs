@@ -11,29 +11,48 @@ import Data.List(foldl',partition,maximumBy)
 import Text.Printf (printf)
 import Control.Monad
 import Control.Monad.Except
+import Text.PrettyPrint.Free hiding (flatten, (<>))
+import System.Environment
 
 import Data.Constraint
 foo :: Backend b s => b -> s -> Inp (ConvertFromSpec s) -> Env b (Out (ConvertFromSpec s))
 foo b s i = case witness b s of Dict -> compile b s >>= run . flip forward i
 
-main = do x <- runExceptT body
+main = do x <- runExceptT $ do
+                cnn <- compile ByHmatrix (In2D 28 28 :++ Reshape2DAs1D :++ FullConnect 256 :++ FullConnect 32 :++ FullConnect 10)
+                debug cnn -- dotrain cnn >>= dotest
           case x of
             Left  _ -> putStrLn "Error."
             Right _ -> putStrLn "Done."
 
-  where
-    body = do
-      cnn <- compile ByHmatrix (In2D 28 28 :++ Reshape2DAs1D :++ FullConnect 128 :++ FullConnect 10)
-      liftIO $ putStrLn "Load training data."
-      dataset <- liftIO $ uncurry zip <$> trainingData
-      liftIO $ putStrLn "Load test data."
-      liftIO $ putStrLn "Learning."
-      cnn <- iterateM 15 (online dataset) cnn
-      dotest cnn
+debug :: (Component n, Inp n ~ Image, Out n ~ Label, MonadIO m, RunInEnv (Run n) m)
+      => n -> m ()
+debug nn = do
+    a0:a1:_ <- liftIO $ getArgs
+    let cycle = read a0 :: Int
+        rate  = read a1 :: Float
+    liftIO $ putStrLn "Load training data."
+    dataset <- liftIO $ uncurry zip <$> trainingData
+    nn <- iterateM cycle (online rate dataset) nn
+    liftIO $ putStrLn "Load test data."
+    testset <- liftIO $ (uncurry zip <$> testData)
+    flip mapM_ (take 10 testset) $ \(ds,ev) -> do
+      pv <- run $ forward nn ds
+      liftIO $ putStrLn ("+" ++ showPretty (text (printf "%02d:" $ postprocess pv) <+> pretty pv))
+      liftIO $ putStrLn ("*" ++ showPretty (text (printf "%02d:" $ postprocess ev) <+> pretty ev))
+
+dotrain :: (Component n, Inp n ~ Image, Out n ~ Label, MonadIO m, RunInEnv (Run n) m)
+       => n -> m n
+dotrain nn = do
+    liftIO $ putStrLn "Load training data."
+    dataset <- liftIO $ uncurry zip <$> trainingData
+    liftIO $ putStrLn "Learning."
+    iterateM 5 (online 0.0001 dataset) nn
 
 dotest :: (Component n, Inp n ~ Image, Out n ~ Label, MonadIO m, RunInEnv (Run n) m)
        => n -> m ()
 dotest !nn = do
+    liftIO $ putStrLn "Load test data."
     testset <- liftIO $ (uncurry zip <$> testData)
     liftIO $ putStrLn "Start test"
     result  <- mapM ((postprocess <$>) . run . forward nn . fst) testset
@@ -42,11 +61,11 @@ dotest !nn = do
     liftIO $ putStrLn $ printf "correct: %d, wrong: %d" (length co) (length wr)
 
 online :: (Component n, Inp n ~ Image, Out n ~ Label, MonadIO m, RunInEnv (Run n) m)
-       => [(Inp n, Out n)] -> n -> m n
-online ds !nn = walk ds nn
+       => Float -> [(Inp n, Out n)] -> n -> m n
+online rate ds !nn = walk ds nn
   where
     walk []     !nn = return nn
-    walk (d:ds) !nn = do !nn <- run $ learn outcost' 0.0010 nn d
+    walk (d:ds) !nn = do !nn <- run $ learn outcost' rate nn d
                          walk ds nn
     outcost' a b = return $ zipVectorWith cost' a b
 
@@ -62,3 +81,8 @@ iterateM n f x = walk 0 x
 postprocess :: Vector Float -> Int
 postprocess = fst . maximumBy cmp . zip [0..] . toList
   where cmp a b = compare (snd a) (snd b)
+
+instance Pretty (Vector Float) where
+  pretty vec = encloseSep langle rangle comma $ map (text . printf "%.04f") $ toList vec
+
+showPretty x = displayS (renderPretty 0.4 500 x) ""

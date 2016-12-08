@@ -14,19 +14,21 @@ import Text.PrettyPrint.Free hiding (flatten)
 import System.IO.Unsafe
 import Parser
 
-main = do x <- runExceptT $ compile ByBLASHS (In1D 768 :++ FullConnect 128 :++ FullConnect 10)
+main = do x <- runExceptT $ compile ByBLASHS (In2D 28 28 :++ Convolution 2 5 2 :++
+                                              Reshape2DAs1D :++ FullConnect 256 :++ FullConnect 32 :++
+                                              FullConnect 10)
           case x of
             Left _ -> putStrLn "Error."
             Right cnn -> debug cnn -- dotrain cnn >>= dotest
 
-debug :: (Component n, Inp n ~ DenseVector Float, Out n ~ DenseVector Float, Run n ~ IO)
+debug :: (Component n, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
       => n -> IO ()
 debug nn = do
   a0:a1:_ <- getArgs
   let cycle = read a0 :: Int
       rate  = read a1 :: Float
   putStrLn "Load training data."
-  dataset <- trainingData >>= mapM preprocess . uncurry zip
+  dataset <- trainingData >>= mapM preprocess . take 1000 . uncurry zip
   nn <- iterateM cycle (online rate dataset) nn
   putStrLn "Load test data."
   testset <- testData >>= mapM preprocess . uncurry zip
@@ -35,7 +37,7 @@ debug nn = do
     prettyResult pv >>= putStrLn . ("+" ++ )
     prettyResult ev >>= putStrLn . ("*" ++ )
 
-dotrain :: (Component n, Inp n ~ DenseVector Float, Out n ~ DenseVector Float, Run n ~ IO)
+dotrain :: (Component n, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
         => n -> IO n
 dotrain nn = do
   putStrLn "Load training data."
@@ -44,7 +46,7 @@ dotrain nn = do
   putStrLn "Learning."
   iterateM 20 (online 0.00008 dataset) nn
 
-dotest :: (Component n, Inp n ~ DenseVector Float, Out n ~ DenseVector Float, Run n ~ IO)
+dotest :: (Component n, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
        => n -> IO ()
 dotest !nn = do
     testset <- testData >>= mapM preprocess . uncurry zip
@@ -54,7 +56,7 @@ dotest !nn = do
     let (co,wr) = partition (uncurry (==)) $ zip result expect
     putStrLn $ printf "correct: %d, wrong: %d" (length co) (length wr)
 
-online :: (Component n, Inp n ~ DenseVector Float, Out n ~ DenseVector Float, Run n ~ IO)
+online :: (Component n, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
        => Float -> [(Inp n, Out n)] -> n -> IO n
 online rate ds !nn = walk ds nn
   where
@@ -74,12 +76,14 @@ iterateM n f x = walk 0 x
                                 a <- f a
                                 walk (i+1) a
 
-preprocess :: (Image, Label) -> IO (DenseVector Float, DenseVector Float)
+type PImage = V.Vector (DenseMatrix Float)
+type PLabel = DenseVector Float
+preprocess :: (Image, Label) -> IO (PImage, PLabel)
 preprocess (img,lbl) = do
   i <- SV.unsafeThaw img
   l <- SV.unsafeThaw lbl
-  return (DenseVector i, DenseVector l)
-postprocess :: DenseVector Float -> IO Int
+  return (V.singleton (DenseMatrix 28 28 i), DenseVector l)
+postprocess :: PLabel -> IO Int
 postprocess v = do
   a <- toListV v
   return $ fst $ maximumBy cmp $ zip [0..] a

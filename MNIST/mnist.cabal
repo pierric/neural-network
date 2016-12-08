@@ -10,5 +10,5 @@ executable mnist
   main-is:             Main.hs
   other-modules:       Parser
   build-depends:       base, neural-network-base, neural-network-hmatrix, hmatrix, binary,
-                        constraints, vector, bytestring, zlib, parallel, mtl
+                       wl-pprint-extras, constraints, vector, bytestring, zlib, parallel, mtl
   default-language:    Haskell2010
