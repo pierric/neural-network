@@ -9,6 +9,7 @@ import qualified Data.Vector.Storable as SV
 import qualified Data.Vector.Storable.Mutable as V
 import Control.Exception
 import Control.Monad
+import Data.IORef
 
 -- mutable vector type
 newtype DenseVector a = DenseVector (V.IOVector a)
@@ -65,6 +66,18 @@ sliceM :: V.Storable a => DenseMatrix a -> (Int, Int) -> DenseVector a
 sliceM (DenseMatrix r c d) (x,y) = assert (x>=0 && x<r && y>=0 && y<c) $ DenseVector v
   where
     v = V.unsafeDrop (x*c+y) d
+
+unsafeReadV :: V.Storable a => DenseVector a -> Int -> IO a
+unsafeReadV (DenseVector v) i = V.unsafeRead v i
+
+unsafeWriteV :: V.Storable a => DenseVector a -> Int -> a -> IO ()
+unsafeWriteV (DenseVector v) i a = V.unsafeWrite v i a
+
+unsafeReadM :: V.Storable a => DenseMatrix a -> (Int, Int) -> IO a
+unsafeReadM (DenseMatrix r c v) (i,j) = assert (i < r && j < c) $ V.unsafeRead v (i*c+j)
+
+unsafeWriteM :: V.Storable a => DenseMatrix a -> (Int, Int) -> a -> IO ()
+unsafeWriteM (DenseMatrix r c v) (i,j) a = assert (i < r && j < c) $ V.unsafeWrite v (i*c+j) a
 
 dropV n (DenseVector v) = DenseVector (V.unsafeDrop n v)
 
@@ -244,8 +257,9 @@ corr2 p k m fun = do
       (mr,mc) = size m
       u       = mr - kr + 2*p + 1
       v       = mc - kc + 2*p + 1
+  zpd <- zero m mr mc p
   wrk <- newDenseMatrixConst (u*v) (kr*kc) 0
-  fill wrk p kr kc mr mc m
+  fill wrk zpd u v kr kc
   fun $ UnsafeV2M (wrk :#> (m2v k))
 
 conv2 :: (V.Storable a, Numeric a)
@@ -255,23 +269,94 @@ conv2 p k m fun = do
       (mr,mc) = size m
       u       = mr - kr + 2*p + 1
       v       = mc - kc + 2*p + 1
+  zpd <- zero m mr mc p
   wrk <- newDenseMatrixConst (u*v) (kr*kc) 0
-  fill wrk p kr kc mr mc m
+  fill wrk zpd u v kr kc
   k' <- case k of DenseMatrix _ _ v -> SV.unsafeFreeze v
   k' <- SV.unsafeThaw (SV.reverse k')
   fun $ UnsafeV2M (wrk :#> (DenseVector k'))
 
-fill wrk p kr kc mr mc m = do
-  let cpytsk = zip [0..] [gen x y | x<-[-p..mr+p-kr], y<-[-p..mc+p-kc]]
-  forM_ cpytsk $ \ (wr, ts) -> do
-    let v = sliceM wrk (wr,0)
-    forM_ ts $ \ (ov, om, len) -> do
-      -- putStrLn $ show (wr,ov,om,len)
-      copyV (dropV ov v) (sliceM m om) len
+zero m mr mc p = do
+  zpd <- newDenseMatrixConst (mr+2*p) (mc+2*p) 0
+  forM_ [0..mr-1] $ \i -> do
+    let t = sliceM zpd (p+i, p)
+        s = sliceM m   (  i, 0)
+    copyV t s mc
+  return zpd
+
+fill wrk@(DenseMatrix _ _ vwrk) m u v kr kc = do
+  refv <- newIORef (DenseVector vwrk)
+  forM_ [0..u-1] $ \i -> do
+    forM_ [0..v-1] $ \j -> do
+      forM_ [0..kr-1] $ \k -> do
+        t <- readIORef refv
+        let s = sliceM m (i+k, j)
+        copyV t s kc
+        writeIORef refv (dropV kc t)
+
+-- fill wrk p kr kc mr mc m = do
+--   let cpytsk = zip [0..] [gen x y | x<-[-p..mr+p-kr], y<-[-p..mc+p-kc]]
+--   forM_ cpytsk $ \ (wr, ts) -> do
+--     let v = sliceM wrk (wr,0)
+--     forM_ ts $ \ (ov, om, len) -> do
+--       -- putStrLn $ show (wr,ov,om,len)
+--       copyV (dropV ov v) (sliceM m om) len
+--   where
+--     gen x y = [ (ov,(omx,omy), len)
+--               | omx <- take kr [x..], omx >=0, omx < mr
+--               , let omy = if y < 0 then 0 else y
+--               , let len = if y < 0 then kc + y else if y + kc <= mc then kc else mc - y
+--               , len > 0
+--               , let ov  = (omx - x)*kc + omy - y ]
+
+-- max pool, picking out the maximum element
+-- in each stride x stride sub-matrices.
+-- assuming that the original matrix row and column size are
+-- both multiple of stride
+pool :: Int -> DenseMatrix Float -> IO (DenseVector Int, DenseMatrix Float)
+pool 1 mat = do
+  let (r,c) = size mat
+  vi <- newDenseVectorConst (r*c) 0
+  return (vi, mat)
+pool stride mat = do
+  mxi <- newDenseVector (r'*c')
+  mxv <- newDenseMatrix r' c'
+  forM_ [0..r'-1] $ \i -> do
+    forM_ [0..c'-1] $ \j -> do
+      (n,v) <- unsafeMaxIndEle mat (i*stride) (j*stride) stride stride
+      unsafeWriteV mxi (i*c'+j) n
+      unsafeWriteM mxv (i,j)    v
+  return (mxi,mxv)
   where
-    gen x y = [ (ov,(omx,omy), len)
-              | omx <- take kr [x..], omx >=0, omx < mr
-              , let omy = if y < 0 then 0 else y
-              , let len = if y < 0 then kc + y else if y + kc <= mc then kc else mc - y
-              , len > 0
-              , let ov  = (omx - x)*kc + omy - y ]
+    (r,c) = size mat
+    r'    = r `div` stride
+    c'    = c `div` stride
+    unsafeMaxIndEle mm x y r c = do
+      mp <- newIORef 0
+      mv <- newIORef (-10000.0)
+      forM_ [0..r-1] $ \ i -> do
+        forM_ [0..c-1] $ \ j -> do
+          v1 <- unsafeReadM mm (x+i, y+j)
+          v0 <- readIORef mv
+          when (v1 > v0) $ do
+            writeIORef mv v1
+            writeIORef mp (i*stride+j)
+      p <- readIORef mp
+      v <- readIORef mv
+      return (p, v)
+
+-- the reverse of max pool.
+-- assuming idx and mat are of the same size
+unpool :: Int -> DenseVector Int -> DenseMatrix Float -> IO (DenseMatrix Float)
+unpool stride idx mat = do
+  mat' <- newDenseMatrixConst r' c' 0
+  forM_ [0..r-1] $ \i -> do
+    forM_ [0..c-1] $ \j -> do
+      pos <- unsafeReadV idx (i*c+j)
+      val <- unsafeReadM mat (i,j)
+      let (oi,oj) = pos `divMod` 2
+      unsafeWriteM mat' (i*stride+oi, j*stride+oj) val
+  return mat'
+  where
+    (r,c) = size mat
+    (r',c') = (r*stride, c*stride)

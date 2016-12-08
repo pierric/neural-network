@@ -23,6 +23,7 @@ data MultiMat
 data F
 data C
 data A
+data P
 data T c
 data S a b
 
@@ -48,6 +49,13 @@ data RunLayer :: * -> * where
   -- output: 1D vector of the concatenation of all input channels
   --         its size: m x a x b
   As1D  :: RunLayer A
+  -- max pooling layer
+  -- input:  channels of 2D floats, of the same size (a x b), # of input channels:  m
+  --         assuming that a and b are both multiple of stride
+  -- output: channels of 2D floats, of the same size (c x d), # of output channels: m
+  --         where c = a / stride
+  --               d = b / stride
+  MaxP :: Int -> RunLayer P
   -- Activator
   -- the input can be either a 1D vector, 2D matrix, or channels of either.
   Activation :: (R->R, R->R) -> RunLayer (T c)
@@ -187,6 +195,28 @@ instance Component (RunLayer (T MultiMat)) where
                                        return o
                            ) iv odelta
       return $ (a, idelta)
+
+instance Component (RunLayer P) where
+  type Run (RunLayer P) = IO
+  type Inp (RunLayer P) = V.Vector (DenseMatrix R)
+  type Out (RunLayer P) = V.Vector (DenseMatrix R)
+  -- trace is (dimension of pools, index of max in each pool, pooled matrix)
+  -- for each channel.
+  newtype Trace (RunLayer P) = PTrace (V.Vector ((Int,Int), DenseVector Int, DenseMatrix R))
+  -- forward is to divide the input matrix in stride x stride sub matrices,
+  -- and then find the max element in each sub matrices.
+  forwardT (MaxP stride) !inp = V.mapM mk inp >>= return . PTrace
+    where
+      mk inp = do
+        (!i,!v) <- pool stride inp
+        return (size v, i, v)
+  output (PTrace a) = V.map (\(_,_,!o) ->o) a
+  -- use the saved index-of-max in each pool to propagate the error.
+  backward l@(MaxP stride) (PTrace t) odelta _ = do
+      !idelta <- V.zipWithM gen t odelta
+      return $ (l, idelta)
+    where
+      gen (!si,!iv,_) od = unpool stride iv od
 
 newFLayer :: Int                -- number of input values
           -> Int                -- number of neurons (output values)
