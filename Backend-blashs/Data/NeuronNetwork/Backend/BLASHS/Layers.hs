@@ -239,7 +239,7 @@ newCLayer inpsize outsize sfilter npadding =
   withSystemRandom . asGenIO $ \gen -> do
       fs <- V.replicateM inpsize $ V.replicateM outsize $
               newDenseMatrixByGen (double2Float <$> truncNormal 0 0.1 gen) sfilter sfilter
-      bs <- return $ V.replicate outsize 0.1
+      bs <- return $ V.replicate outsize 0.1 
       return $ Conv fs bs npadding
   where
     truncNormal m s g = do

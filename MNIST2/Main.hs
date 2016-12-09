@@ -14,7 +14,7 @@ import Text.PrettyPrint.Free hiding (flatten)
 import System.IO.Unsafe
 import Parser
 
-main = do x <- runExceptT $ compile ByBLASHS (In2D 28 28 :++ Convolution 2 5 2 :++
+main = do x <- runExceptT $ compile ByBLASHS (In2D 28 28 :++ Convolution 8 5 2 :++ MaxPooling 2 :++
                                               Reshape2DAs1D :++ FullConnect 256 :++ FullConnect 32 :++
                                               FullConnect 10)
           case x of
@@ -28,7 +28,7 @@ debug nn = do
   let cycle = read a0 :: Int
       rate  = read a1 :: Float
   putStrLn "Load training data."
-  dataset <- trainingData >>= mapM preprocess . take 1000 . uncurry zip
+  dataset <- trainingData >>= mapM preprocess . uncurry zip
   nn <- iterateM cycle (online rate dataset) nn
   putStrLn "Load test data."
   testset <- testData >>= mapM preprocess . uncurry zip

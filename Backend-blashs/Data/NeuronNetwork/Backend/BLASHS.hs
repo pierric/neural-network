@@ -56,6 +56,8 @@ instance ComputeSize SpecFullConnect where
   lsize _ (FullConnect n)   = D1 n
 instance ComputeSize SpecConvolution where
   lsize (Just (D2 _ m n)) (Convolution k f p) = D2 k (m+2*p-f+1) (n+2*p-f+1)
+instance ComputeSize SpecMaxPooling where
+  lsize (Just (D2 k m n)) (MaxPooling s) = D2 k (m `div` s) (n `div` s)
 
 -- translate the body of specification
 class TranslateBody s where
@@ -73,6 +75,11 @@ instance TranslateBody SpecConvolution where
   trans (D2 k s t) (Convolution n f p) = do u <- lift $ newCLayer k n f p
                                             return $ Stack u (Activation (relu, relu'))
   trans _ _ = throwError ErrMismatch
+
+instance TranslateBody SpecMaxPooling where
+  type SpecToTag SpecMaxPooling = P
+  trans (D2 _ _ _) (MaxPooling n) = return (MaxP n)
+  trans (D1 _)     _              = throwError ErrMismatch
 
 instance TranslateBody SpecReshape2DAs1D where
   type SpecToTag SpecReshape2DAs1D = A
