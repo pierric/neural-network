@@ -10,6 +10,7 @@ import qualified Data.Vector.Storable.Mutable as V
 import Control.Exception
 import Control.Monad
 import Data.IORef
+import Data.NeuronNetwork.Backend.BLASHS.SIMD
 
 -- mutable vector type
 newtype DenseVector a = DenseVector (V.IOVector a)
@@ -127,7 +128,7 @@ class AssignTo c a where
   (<<=) :: c a -> Op c a -> IO ()
   (<<+) :: c a -> Op c a -> IO ()
 
-instance (Numeric a, V.Storable a) => AssignTo DenseVector a where
+instance (Numeric a, V.Storable a, SIMDable a) => AssignTo DenseVector a where
   (DenseVector v) <<= (DenseVector x :<# DenseMatrix r c y) =
     assert (V.length x == r && V.length v == c) $ gemv_helper Trans r c 1.0 y c x 0.0 v
 
@@ -196,7 +197,7 @@ gemv_helper trans row col alpha x lda y beta v =
   V.unsafeWith v (\pv ->
     gemv RowMajor trans row col alpha px lda py 1 beta pv 1)))
 
-instance (Numeric a, V.Storable a) => AssignTo DenseMatrix a where
+instance (Numeric a, V.Storable a, SIMDable a) => AssignTo DenseMatrix a where
   (DenseMatrix vr vc v) <<= (DenseMatrix xr xc x :.* DenseMatrix yr yc y) =
     assert (vr == xr && vr == yr && vc == xc && vc == yc) $ hadamard (*) v x y
 
@@ -231,17 +232,17 @@ instance (Numeric a, V.Storable a) => AssignTo DenseMatrix a where
 
   _ <<+ _ = error "Unsupported Op [Matrix <<+]."
 
-hadamard :: (V.Storable a, Num a)
-         => (a -> a -> a) -> V.IOVector a -> V.IOVector a -> V.IOVector a -> IO ()
-hadamard op v x y = assert (V.length x == sz && V.length y == sz) $ go 0
-  where
-    sz = V.length v
-    go !i = if (i == sz)
-              then return ()
-              else do a <- V.unsafeRead x i
-                      b <- V.unsafeRead y i
-                      V.unsafeWrite v i (op a b)
-                      go (i+1)
+-- hadamard :: (V.Storable a, Num a)
+--          => (a -> a -> a) -> V.IOVector a -> V.IOVector a -> V.IOVector a -> IO ()
+-- hadamard op v x y = assert (V.length x == sz && V.length y == sz) $ go 0
+--   where
+--     sz = V.length v
+--     go !i = if (i == sz)
+--               then return ()
+--               else do a <- V.unsafeRead x i
+--                       b <- V.unsafeRead y i
+--                       V.unsafeWrite v i (op a b)
+--                       go (i+1)
 
 sumElements :: (V.Storable a, Num a) => DenseMatrix a -> IO a
 sumElements (DenseMatrix r c v) = go v (r*c) 0
