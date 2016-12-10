@@ -15,16 +15,34 @@ build-type:          Simple
 -- extra-source-files:
 cabal-version:       >=1.10
 
+flag vec128
+  Description: Enable 128-bit vector hardware instructions.
+  Default:     False
+  Manual:      True
+flag vec256
+  Description: Enable 256-bit vector hardware instructions.
+  Default:     False
+  Manual:      True
+flag vec512
+  Description: Enable 512-bit vector hardware instructions.
+  Default:     False
+  Manual:      True
+
 library
+  if flag(vec128)
+    hs-source-dirs:    ., vec128
+  else
+    hs-source-dirs:    ., novec
   exposed-modules:     Data.NeuronNetwork.Backend.BLASHS
   other-modules:       Data.NeuronNetwork.Backend.BLASHS.Layers
                        Data.NeuronNetwork.Backend.BLASHS.Utils
-  build-depends:       base, blas-hs, mwc-random, mtl, vector, constraints, neural-network-base
+                       Data.NeuronNetwork.Backend.BLASHS.SIMD
+  build-depends:       base, blas-hs, mwc-random, mtl, vector, constraints, primitive-simd, neural-network-base
   default-language:    Haskell2010
 
 test-suite s1
   type:               exitcode-stdio-1.0
   main-is:            Test/S1.hs
   other-modules:      Data.NeuronNetwork.Backend.BLASHS.Utils, Test.Utils, Test.Gen
-  build-depends:      hspec, QuickCheck, base, hmatrix, vector, blas-hs
+  build-depends:      hspec, QuickCheck, base, hmatrix, vector, primitive-simd, blas-hs
   default-language:   Haskell2010
