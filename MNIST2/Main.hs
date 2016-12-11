@@ -6,6 +6,7 @@ import Data.NeuronNetwork.Backend.BLASHS
 import qualified Data.Vector as V
 import qualified Data.Vector.Storable as SV
 import Data.List(foldl',partition,maximumBy)
+import Data.IORef
 import Text.Printf (printf)
 import Control.Monad
 import Control.Monad.Except
@@ -14,8 +15,11 @@ import Text.PrettyPrint.Free hiding (flatten)
 import System.IO.Unsafe
 import Parser
 
-main = do x <- runExceptT $ compile ByBLASHS (In2D 28 28 :++ Convolution 8 5 2 :++ MaxPooling 2 :++
-                                              Reshape2DAs1D :++ FullConnect 256 :++ FullConnect 32 :++
+main = do x <- runExceptT $ compile ByBLASHS (In2D 28 28 :++
+                                              -- Convolution 2 5 2 :++ MaxPooling 2 :++
+                                              -- Convolution 8 5 2 :++ MaxPooling 2 :++
+                                              Reshape2DAs1D :++
+                                              FullConnect 256 :++
                                               FullConnect 10)
           case x of
             Left _ -> putStrLn "Error."
@@ -29,13 +33,27 @@ debug nn = do
       rate  = read a1 :: Float
   putStrLn "Load training data."
   dataset <- trainingData >>= mapM preprocess . uncurry zip
-  nn <- iterateM cycle (online rate dataset) nn
-  putStrLn "Load test data."
-  testset <- testData >>= mapM preprocess . uncurry zip
-  flip mapM_ (take 10 testset) $ \(ds,ev) -> do
-    pv <- forward nn ds
-    prettyResult pv >>= putStrLn . ("+" ++ )
-    prettyResult ev >>= putStrLn . ("*" ++ )
+  testset <- testData >>= mapM preprocess . take 10 . uncurry zip
+  cnt <- newIORef 0 :: IO (IORef Int)
+  let dispAndInc = do
+        i <- readIORef cnt
+        writeIORef cnt (i+1)
+        putStrLn ("Iteration " ++ show i)
+  nn <- iterateM (cycle `div` checkpoint) nn $ \nn1 -> do
+          nn1 <- iterateM checkpoint nn1 $ (dispAndInc >>) . online rate dataset
+          putStrLn "[test]..."
+          smalltest testset nn1
+          return nn1
+  nn <- iterateM (cycle `mod` checkpoint) nn $ (dispAndInc >>) . online rate dataset
+  putStrLn "[final test]..."
+  smalltest testset nn
+  where
+    checkpoint = 2
+    smalltest it nn = do
+      flip mapM_ it $ \(ds,ev) -> do
+        pv <- forward nn ds
+        prettyResult pv >>= putStrLn . ("+" ++ )
+        prettyResult ev >>= putStrLn . ("*" ++ )
 
 dotrain :: (Component n, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
         => n -> IO n
@@ -44,7 +62,7 @@ dotrain nn = do
   dataset <- trainingData >>= mapM preprocess . uncurry zip
   putStrLn "Load test data."
   putStrLn "Learning."
-  iterateM 20 (online 0.00008 dataset) nn
+  iterateM 20 nn (online 0.00008 dataset)
 
 dotest :: (Component n, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
        => n -> IO ()
@@ -67,14 +85,15 @@ online rate ds !nn = walk ds nn
                       v <<= ZipWith cost' a b
                       return v
 
-iterateM :: (MonadIO m) => Int -> (a -> m a) -> a -> m a
-iterateM n f x = walk 0 x
+iterateM :: (MonadIO m) => Int -> a -> (a -> m a) -> m a
+iterateM n x f = go 0 x
   where
-    walk !i !a | i == n    = return a
-               | otherwise = do -- when (i `mod` 10 == 0) $ putStrLn ("Iteration " ++ show i)
-                                liftIO $ putStrLn ("Iteration " ++ show i)
-                                a <- f a
-                                walk (i+1) a
+    go i x = if i == n
+             then
+               return x
+             else do
+               x <- f x
+               go (i+1) x
 
 type PImage = V.Vector (DenseMatrix Float)
 type PLabel = DenseVector Float
@@ -82,7 +101,7 @@ preprocess :: (Image, Label) -> IO (PImage, PLabel)
 preprocess (img,lbl) = do
   i <- SV.unsafeThaw img
   l <- SV.unsafeThaw lbl
-  return (V.singleton (DenseMatrix 28 28 i), DenseVector l)
+  return (V.singleton $ DenseMatrix 28 28 i, DenseVector l)
 postprocess :: PLabel -> IO Int
 postprocess v = do
   a <- toListV v
