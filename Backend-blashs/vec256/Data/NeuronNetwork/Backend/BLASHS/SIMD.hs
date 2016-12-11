@@ -38,4 +38,4 @@ instance SIMDable Float where
         let vx = SV.ifoldl' (\v i a -> unsafeInsertVector v a i) nullVector sx
             vy = SV.ifoldl' (\v i a -> unsafeInsertVector v a i) nullVector sy
             (vz0,vz1,vz2,vz3,vz4,vz5,vz6,_) = unpackVector (op vx vy)
-        mapM_ (zip [0..n-1] [vz0,vz1,vz2,vz3,vz4,vz5,vz6]) $ uncurry (unsafeWrite z)
+        forM_ (zip [0..n-1] [vz0,vz1,vz2,vz3,vz4,vz5,vz6]) $ uncurry (unsafeWrite z)

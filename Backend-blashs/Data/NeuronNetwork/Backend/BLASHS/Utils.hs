@@ -116,6 +116,7 @@ data Op :: (* -> *) -> * -> * where
   Scale :: a -> Op c a
   -- apply a function
   Apply :: (a -> a) -> Op c a
+  Apply2 :: (SIMDPACK a -> SIMDPACK a) -> Op c a
   -- zip with a function
   ZipWith :: (a -> a -> a) -> c a -> c a -> Op c a
   -- interpret an op to vector as an op to matrix
@@ -153,6 +154,7 @@ instance (Numeric a, V.Storable a, SIMDable a) => AssignTo DenseVector a where
       sz = V.length v
       go !i | i == sz = return ()
             | otherwise = V.modify v f i >> go (i+1)
+  (DenseVector v) <<= Apply2 f = foreach f v v
 
   (DenseVector v) <<= ZipWith f (DenseVector x) (DenseVector y) =
     assert (sz1 == sz2 && sz2 == sz3) $ go 0

@@ -10,6 +10,7 @@ import GHC.Float
 import Data.STRef
 import Data.NeuronNetwork
 import Data.NeuronNetwork.Backend.BLASHS.Utils
+import Data.NeuronNetwork.Backend.BLASHS.SIMD
 
 type R = Float
 type M = IO
@@ -122,7 +123,7 @@ instance Component (RunLayer C) where
       feature f b = do
         mat <- newDenseMatrix outr outc
         V.zipWithM_ (\a b -> corr2 pd a b (mat <<+)) f inp
-        mat <<= Apply (+ b)
+        mat <<= Apply2 (+ konst b)
         return mat
   output (CTrace (_,!a)) = a
   backward (Conv fs bs pd) (CTrace (iv, av)) !odelta rate = do
