@@ -2,8 +2,8 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE TypeFamilies #-}
 module Data.NeuralNetwork.Backend.BLASHS (
-  module Data.NeuronNetwork.Backend.BLASHS.Layers,
-  module Data.NeuronNetwork.Backend.BLASHS.Utils,
+  module Data.NeuralNetwork.Backend.BLASHS.Layers,
+  module Data.NeuralNetwork.Backend.BLASHS.Utils,
   ByBLASHS(..),
   ErrCode(..),
   cost'

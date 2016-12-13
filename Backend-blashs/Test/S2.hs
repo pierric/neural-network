@@ -1,5 +1,5 @@
 module Main where
-import Data.NeuronNetwork.Backend.BLASHS.Utils
+import Data.NeuralNetwork.Backend.BLASHS.Utils
 import qualified Data.Vector.Storable as SV
 import Numeric.LinearAlgebra
 import Test.Utils

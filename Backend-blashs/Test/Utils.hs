@@ -3,7 +3,7 @@ module Test.Utils where
 import Numeric.LinearAlgebra
 import Control.Exception
 import Control.Monad
-import qualified Data.NeuronNetwork.Backend.BLASHS.Utils as U
+import qualified Data.NeuralNetwork.Backend.BLASHS.Utils as U
 import qualified Numeric.LinearAlgebra as L
 import Numeric.LinearAlgebra.Devel
 import qualified Data.Vector.Storable as V
