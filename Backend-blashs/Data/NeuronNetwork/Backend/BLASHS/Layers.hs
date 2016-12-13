@@ -59,7 +59,7 @@ data RunLayer :: * -> * where
   MaxP :: Int -> RunLayer P
   -- Activator
   -- the input can be either a 1D vector, 2D matrix, or channels of either.
-  Activation :: (R->R, R->R) -> RunLayer (T c)
+  Activation :: (SIMDPACK R -> SIMDPACK R, SIMDPACK R -> SIMDPACK R) -> RunLayer (T c)
   -- stacking two components a and b
   -- the output of a should matches the input of b
   Stack :: !(RunLayer a) -> !(RunLayer b) -> RunLayer (S a b)
@@ -123,7 +123,7 @@ instance Component (RunLayer C) where
       feature f b = do
         mat <- newDenseMatrix outr outc
         V.zipWithM_ (\a b -> corr2 pd a b (mat <<+)) f inp
-        mat <<= Apply2 (+ konst b)
+        mat <<= Apply (+ konst b)
         return mat
   output (CTrace (_,!a)) = a
   backward (Conv fs bs pd) (CTrace (iv, av)) !odelta rate = do
@@ -240,7 +240,7 @@ newCLayer inpsize outsize sfilter npadding =
   withSystemRandom . asGenIO $ \gen -> do
       fs <- V.replicateM inpsize $ V.replicateM outsize $
               newDenseMatrixByGen (double2Float <$> truncNormal 0 0.1 gen) sfilter sfilter
-      bs <- return $ V.replicate outsize 0.1 
+      bs <- return $ V.replicate outsize 0.1
       return $ Conv fs bs npadding
   where
     truncNormal m s g = do

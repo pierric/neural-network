@@ -115,10 +115,9 @@ data Op :: (* -> *) -> * -> * where
   -- scale of vector or matrix
   Scale :: a -> Op c a
   -- apply a function
-  Apply :: (a -> a) -> Op c a
-  Apply2 :: (SIMDPACK a -> SIMDPACK a) -> Op c a
+  Apply :: (SIMDPACK a -> SIMDPACK a) -> Op c a
   -- zip with a function
-  ZipWith :: (a -> a -> a) -> c a -> c a -> Op c a
+  ZipWith :: (SIMDPACK a -> SIMDPACK a -> SIMDPACK a) -> c a -> c a -> Op c a
   -- interpret an op to vector as an op to matrix
   UnsafeV2M :: Op DenseVector a -> Op DenseMatrix a
   -- scale the result of some op
@@ -149,24 +148,9 @@ instance (Numeric a, V.Storable a, SIMDable a) => AssignTo DenseVector a where
   (DenseVector v) <<= Scale s =
     V.unsafeWith v (\pv -> scal (V.length v) s pv 1)
 
-  (DenseVector v) <<= Apply f = go 0
-    where
-      sz = V.length v
-      go !i | i == sz = return ()
-            | otherwise = V.modify v f i >> go (i+1)
-  (DenseVector v) <<= Apply2 f = foreach f v v
+  (DenseVector v) <<= Apply f = foreach f v v
 
-  (DenseVector v) <<= ZipWith f (DenseVector x) (DenseVector y) =
-    assert (sz1 == sz2 && sz2 == sz3) $ go 0
-    where
-      sz1 = V.length v
-      sz2 = V.length x
-      sz3 = V.length y
-      go !i | i == sz1 = return ()
-            | otherwise = do a <- V.read x i
-                             b <- V.read y i
-                             V.write v i (f a b)
-                             go (i+1)
+  (DenseVector v) <<= ZipWith f (DenseVector x) (DenseVector y) = hadamard f v x y
 
   (DenseVector v) <<= Scale' a (DenseMatrix r c x :#> DenseVector y) =
     assert (V.length y == c && V.length v == r) $ gemv_helper NoTrans r c a x c y 0.0 v

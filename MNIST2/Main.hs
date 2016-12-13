@@ -1,7 +1,7 @@
 {-# LANGUAGE TypeFamilies, BangPatterns, TypeOperators, FlexibleContexts, FlexibleInstances, ScopedTypeVariables #-}
 module Main where
 
-import Data.NeuronNetwork
+import Data.NeuronNetwork hiding (cost')
 import Data.NeuronNetwork.Backend.BLASHS
 import qualified Data.Vector as V
 import qualified Data.Vector.Storable as SV

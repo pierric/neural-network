@@ -5,12 +5,14 @@ module Data.NeuronNetwork.Backend.BLASHS (
   module Data.NeuronNetwork.Backend.BLASHS.Layers,
   module Data.NeuronNetwork.Backend.BLASHS.Utils,
   ByBLASHS(..),
-  ErrCode(..)
+  ErrCode(..),
+  cost'
 ) where
 
-import Data.NeuronNetwork
+import Data.NeuronNetwork hiding (relu, relu', cost')
 import Data.NeuronNetwork.Backend.BLASHS.Layers
 import Data.NeuronNetwork.Backend.BLASHS.Utils
+import Data.NeuronNetwork.Backend.BLASHS.SIMD
 import Control.Monad.Except
 import Data.Constraint (Dict(..))
 

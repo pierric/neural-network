@@ -31,12 +31,15 @@ flag vec512
 library
   if flag(vec128)
     hs-source-dirs:     ., vec128
+    ghc-options:        -fllvm
   else
     if flag(vec256)
       hs-source-dirs:   ., vec256
+      ghc-options:      -fllvm -mavx2
     else
       if flag(vec512)
         hs-source-dirs: ., vec512
+        ghc-options:    -fllvm -mavx512
       else
         hs-source-dirs: ., novec
   exposed-modules:     Data.NeuronNetwork.Backend.BLASHS
