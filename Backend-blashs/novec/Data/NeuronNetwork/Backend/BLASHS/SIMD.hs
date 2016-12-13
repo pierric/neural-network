@@ -2,7 +2,6 @@
 module Data.NeuronNetwork.Backend.BLASHS.SIMD where
 
 import Data.Vector.Storable.Mutable as MV
-import Data.Primitive.SIMD
 import Control.Exception
 import qualified Data.NeuronNetwork as B
 
