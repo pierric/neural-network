@@ -1,15 +1,15 @@
 {-# LANGUAGE MultiParamTypeClasses, FlexibleContexts, FlexibleInstances #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE TypeFamilies #-}
-module Data.NeuronNetwork.Backend.HMatrix (
-  module Data.NeuronNetwork.Backend.HMatrix.Layers,
+module Data.NeuralNetwork.Backend.HMatrix (
+  module Data.NeuralNetwork.Backend.HMatrix.Layers,
   ByHmatrix(..),
   ErrCode(..)
 ) where
 
-import Data.NeuronNetwork
-import Data.NeuronNetwork.Backend.HMatrix.Utils
-import Data.NeuronNetwork.Backend.HMatrix.Layers
+import Data.NeuralNetwork
+import Data.NeuralNetwork.Backend.HMatrix.Utils
+import Data.NeuralNetwork.Backend.HMatrix.Layers
 import Numeric.LinearAlgebra (Vector, Matrix)
 import Control.Monad.Except
 import Data.Functor.Identity

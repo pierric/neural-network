@@ -1,9 +1,9 @@
 {-# LANGUAGE TypeFamilies, FlexibleContexts #-}
-module Data.NeuronNetwork.Backend.BLASHS.SIMD where
+module Data.NeuralNetwork.Backend.BLASHS.SIMD where
 
 import Data.Vector.Storable.Mutable as MV
 import Control.Exception
-import qualified Data.NeuronNetwork as B
+import qualified Data.NeuralNetwork as B
 
 class Num (SIMDPACK a) => SIMDable a where
   type SIMDPACK a

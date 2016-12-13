@@ -2,7 +2,7 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleContexts #-}
-module Data.NeuronNetwork (
+module Data.NeuralNetwork (
   Component(..),
   learn,
   relu, relu',

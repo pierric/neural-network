@@ -1,5 +1,5 @@
 {-# LANGUAGE BangPatterns, TypeFamilies, TypeOperators, FlexibleInstances, FlexibleContexts, GADTs #-}
-module Data.NeuronNetwork.Backend.BLASHS.Layers where
+module Data.NeuralNetwork.Backend.BLASHS.Layers where
 
 import qualified Data.Vector as V
 import System.Random.MWC
@@ -8,9 +8,9 @@ import Control.Monad.ST
 import Control.Monad (liftM2, forM_, when)
 import GHC.Float
 import Data.STRef
-import Data.NeuronNetwork
-import Data.NeuronNetwork.Backend.BLASHS.Utils
-import Data.NeuronNetwork.Backend.BLASHS.SIMD
+import Data.NeuralNetwork
+import Data.NeuralNetwork.Backend.BLASHS.Utils
+import Data.NeuralNetwork.Backend.BLASHS.SIMD
 
 type R = Float
 type M = IO

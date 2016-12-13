@@ -1,8 +1,8 @@
 {-# LANGUAGE TypeFamilies, BangPatterns, TypeOperators, FlexibleContexts, FlexibleInstances, ScopedTypeVariables #-}
 module Main where
 
-import Data.NeuronNetwork
-import Data.NeuronNetwork.Backend.HMatrix
+import Data.NeuralNetwork
+import Data.NeuralNetwork.Backend.HMatrix
 import Numeric.LinearAlgebra
 import Numeric.LinearAlgebra.Devel
 import Parser

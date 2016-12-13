@@ -1,5 +1,5 @@
 {-# LANGUAGE BangPatterns, TypeFamilies, TypeOperators, FlexibleInstances, FlexibleContexts, GADTs #-}
-module Data.NeuronNetwork.Backend.HMatrix.Layers where
+module Data.NeuralNetwork.Backend.HMatrix.Layers where
 
 import Numeric.LinearAlgebra hiding (R, C)
 import Numeric.LinearAlgebra.Devel
@@ -14,8 +14,8 @@ import GHC.Float
 import Data.STRef
 import Data.Functor.Identity
 import Control.DeepSeq
-import Data.NeuronNetwork
-import Data.NeuronNetwork.Backend.HMatrix.Utils
+import Data.NeuralNetwork
+import Data.NeuralNetwork.Backend.HMatrix.Utils
 
 type R = Float
 

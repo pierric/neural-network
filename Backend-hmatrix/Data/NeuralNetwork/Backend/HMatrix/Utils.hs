@@ -1,5 +1,5 @@
 {-# LANGUAGE BangPatterns, FlexibleInstances, FlexibleContexts, ForeignFunctionInterface #-}
-module Data.NeuronNetwork.Backend.HMatrix.Utils where
+module Data.NeuralNetwork.Backend.HMatrix.Utils where
 import Numeric.LinearAlgebra
 import Numeric.LinearAlgebra.Devel
 import Numeric.GSL.Fourier

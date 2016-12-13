@@ -1,5 +1,5 @@
 {-# LANGUAGE TypeFamilies, FlexibleContexts, BangPatterns #-}
-module Data.NeuronNetwork.Backend.BLASHS.SIMD where
+module Data.NeuralNetwork.Backend.BLASHS.SIMD where
 
 import Data.Vector.Storable.Mutable as MV
 import qualified Data.Vector.Storable as SV

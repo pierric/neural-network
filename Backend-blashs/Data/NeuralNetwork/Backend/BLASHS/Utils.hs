@@ -1,7 +1,7 @@
 {-# LANGUAGE TypeFamilies, TypeOperators, GADTs #-}
 {-# LANGUAGE MultiParamTypeClasses, FlexibleInstances #-}
 {-# LANGUAGE BangPatterns #-}
-module Data.NeuronNetwork.Backend.BLASHS.Utils where
+module Data.NeuralNetwork.Backend.BLASHS.Utils where
 
 import Blas.Generic.Unsafe
 import Blas.Primitive.Types
@@ -10,7 +10,7 @@ import qualified Data.Vector.Storable.Mutable as V
 import Control.Exception
 import Control.Monad
 import Data.IORef
-import Data.NeuronNetwork.Backend.BLASHS.SIMD
+import Data.NeuralNetwork.Backend.BLASHS.SIMD
 
 -- mutable vector type
 newtype DenseVector a = DenseVector (V.IOVector a)

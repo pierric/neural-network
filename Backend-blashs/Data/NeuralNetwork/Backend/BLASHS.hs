@@ -1,7 +1,7 @@
 {-# LANGUAGE MultiParamTypeClasses, FlexibleContexts, FlexibleInstances #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE TypeFamilies #-}
-module Data.NeuronNetwork.Backend.BLASHS (
+module Data.NeuralNetwork.Backend.BLASHS (
   module Data.NeuronNetwork.Backend.BLASHS.Layers,
   module Data.NeuronNetwork.Backend.BLASHS.Utils,
   ByBLASHS(..),
@@ -9,10 +9,10 @@ module Data.NeuronNetwork.Backend.BLASHS (
   cost'
 ) where
 
-import Data.NeuronNetwork hiding (relu, relu', cost')
-import Data.NeuronNetwork.Backend.BLASHS.Layers
-import Data.NeuronNetwork.Backend.BLASHS.Utils
-import Data.NeuronNetwork.Backend.BLASHS.SIMD
+import Data.NeuralNetwork hiding (relu, relu', cost')
+import Data.NeuralNetwork.Backend.BLASHS.Layers
+import Data.NeuralNetwork.Backend.BLASHS.Utils
+import Data.NeuralNetwork.Backend.BLASHS.SIMD
 import Control.Monad.Except
 import Data.Constraint (Dict(..))
 
