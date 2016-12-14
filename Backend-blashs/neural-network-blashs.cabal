@@ -11,7 +11,7 @@ author:              jason wu
 maintainer:          jiasenwu@hotmail.com
 -- copyright:
 -- category:
-build-type:          Simple
+build-type:          Custom
 -- extra-source-files:
 cabal-version:       >=1.10
 
@@ -32,21 +32,18 @@ library
   if flag(vec128)
     hs-source-dirs:     ., vec128
     ghc-options:        -fllvm
-    build-depends:      base, blas-hs, mwc-random, mtl, vector, constraints, primitive-simd, neural-network-base
   else
     if flag(vec256)
       hs-source-dirs:   ., vec256
       ghc-options:      -fllvm -mavx2
-      build-depends:    base, blas-hs, mwc-random, mtl, vector, constraints, primitive-simd, neural-network-base
     else
       if flag(vec512)
         hs-source-dirs: ., vec512
         ghc-options:    -fllvm -mavx512
-        build-depends:  base, blas-hs, mwc-random, mtl, vector, constraints, primitive-simd, neural-network-base
       else
         hs-source-dirs: ., novec
-        build-depends:  base, blas-hs, mwc-random, mtl, vector, constraints, neural-network-base
 
+  build-depends:       base, blas-hs, mwc-random, mtl, vector, constraints, ghc-prim, neural-network-base
   exposed-modules:     Data.NeuralNetwork.Backend.BLASHS
   other-modules:       Data.NeuralNetwork.Backend.BLASHS.Layers
                        Data.NeuralNetwork.Backend.BLASHS.Utils

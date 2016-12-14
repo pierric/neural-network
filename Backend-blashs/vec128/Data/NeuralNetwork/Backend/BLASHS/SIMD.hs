@@ -1,24 +1,52 @@
-{-# LANGUAGE TypeFamilies, FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies, FlexibleContexts, FlexibleInstances #-}
+{-# LANGUAGE UnboxedTuples, MagicHash #-}
+{-# LANGUAGE GHCForeignImportPrim, UnliftedFFITypes #-}
 module Data.NeuralNetwork.Backend.BLASHS.SIMD where
 
 import Data.Vector.Storable.Mutable as MV
 import qualified Data.Vector.Storable as SV
-import Data.Primitive.SIMD
 import Control.Exception
 import Control.Monad
 
-class Num (SIMDPACK a) => SIMDable a where
-  type SIMDPACK a
+import GHC.Prim
+import GHC.Base
+import GHC.Exts
+import GHC.Ptr (Ptr(..))
+import Foreign.Storable (Storable(..))
+
+foreign import prim "vfcomp_oge" fcomp_oge :: FloatX4# -> FloatX4# -> Word32X4#
+foreign import prim "vselect"    select    :: Word32X4# -> FloatX4# -> FloatX4# -> FloatX4#
+
+data Word32X4 = Word32X4 Word32X4#
+
+data CompareFunc = GE
+
+class SIMDVector v => Comparable v where
+  compareVector :: CompareFunc -> v -> v -> Word32X4
+  selectVector  :: Word32X4 -> v -> v -> v
+
+instance Comparable (SIMDPACK Float) where
+  compareVector GE (FloatX4 x) (FloatX4 y) = Word32X4 (fcomp_oge x y)
+  selectVector (Word32X4 s) (FloatX4 x) (FloatX4 y) = FloatX4 (select s x y)
+
+class SIMDable a where
+  data SIMDPACK a
   hadamard :: (SIMDPACK a -> SIMDPACK a -> SIMDPACK a) -> IOVector a -> IOVector a -> IOVector a -> IO ()
   konst    :: a -> SIMDPACK a
   foreach  :: (SIMDPACK a -> SIMDPACK a) -> IOVector a -> IOVector a -> IO ()
+  plus     :: SIMDPACK a -> SIMDPACK a -> SIMDPACK a
+  minus    :: SIMDPACK a -> SIMDPACK a -> SIMDPACK a
+  times    :: SIMDPACK a -> SIMDPACK a -> SIMDPACK a
 
 instance SIMDable Float where
-  type SIMDPACK Float = FloatX4
+  data SIMDPACK Float = FloatX4 FloatX4#
+  plus   (FloatX4 a) (FloatX4 b) = FloatX4 (plusFloatX4#  a b)
+  minus  (FloatX4 a) (FloatX4 b) = FloatX4 (minusFloatX4# a b)
+  times  (FloatX4 a) (FloatX4 b) = FloatX4 (timesFloatX4# a b)
   hadamard op v x y = assert (MV.length x == sz && MV.length y == sz) $ do
-    let sv = unsafeCast v :: IOVector FloatX4
-        sx = unsafeCast x :: IOVector FloatX4
-        sy = unsafeCast y :: IOVector FloatX4
+    let sv = unsafeCast v :: IOVector (SIMDPACK Float)
+        sx = unsafeCast x :: IOVector (SIMDPACK Float)
+        sy = unsafeCast y :: IOVector (SIMDPACK Float)
     go (MV.length sv) sv sx sy
     let rm = sz `mod` 4
         rn = sz - rm
@@ -49,8 +77,8 @@ instance SIMDable Float where
   konst = broadcastVector
 
   foreach op v x = assert (sz == MV.length x) $ do
-    let sv = unsafeCast v :: IOVector FloatX4
-        sx = unsafeCast x :: IOVector FloatX4
+    let sv = unsafeCast v :: IOVector (SIMDPACK Float)
+        sx = unsafeCast x :: IOVector (SIMDPACK Float)
     go (MV.length sv) sv sx
     let rm = sz `mod` 4
         rn = sz - rm
@@ -74,13 +102,71 @@ instance SIMDable Float where
           when (n > 2) $ do
             unsafeWrite z 2 vz2
 
-relu, relu' :: FloatX4 -> FloatX4
-relu  x = selectVector (compareVector GE x 0) x 0
-relu' x = selectVector (compareVector GE 0 x) 0 1
+relu, relu' :: SIMDPACK Float -> SIMDPACK Float
+relu  x = let v0 = broadcastVector 0
+          in selectVector (compareVector GE x v0) x v0
+relu' x = let v0 = broadcastVector 0
+              v1 = broadcastVector 1
+          in selectVector (compareVector GE v0 x) v0 v1
 
-cost' :: FloatX4 -> FloatX4 -> FloatX4
+cost' :: SIMDPACK Float -> SIMDPACK Float -> SIMDPACK Float
 cost' a y = selectVector (compareVector GE a y)
-              (selectVector (compareVector GE y 1)
-                0
-                (a - y))
-              (a - y)
+              (selectVector (compareVector GE y (broadcastVector 1))
+                (broadcastVector 0)
+                (minus a y))
+              (minus a y)
+
+instance Storable (SIMDPACK Float) where
+    sizeOf x     = vectorSize x * elementSize x
+    alignment    = sizeOf
+    peek (Ptr a) = IO $ \s -> let (# s', r #) = readFloatX4OffAddr# a 0# s in (# s', FloatX4 r #)
+    poke (Ptr a) (FloatX4 b) = IO $ \s -> (# writeFloatX4OffAddr# a 0# b s, () #)
+
+class SIMDVector v where
+    -- | Type of the elements in the vector
+    type Elem v
+    -- | Type used to pack or unpack the vector
+    type ElemTuple v
+    -- | Vector with all elements initialized to zero.
+    nullVector       :: v
+    -- | Number of components (scalar elements) in the vector. The argument is not evaluated.
+    vectorSize       :: v -> Int
+    -- | Size of each (scalar) element in the vector in bytes. The argument is not evaluated.
+    elementSize      :: v -> Int
+    -- | Broadcast a scalar to all elements of a vector.
+    broadcastVector  :: Elem v -> v
+    -- | Insert a scalar at the given position (starting from 0) in a vector. If the index is outside of the range an exception is thrown.
+    insertVector     :: v -> Elem v -> Int -> v
+    insertVector v e i | i < 0            = error $ "insertVector: negative argument: " ++ show i
+                       | i < vectorSize v = unsafeInsertVector v e i
+                       | otherwise        = error $ "insertVector: argument too large: " ++ show i
+    -- | Insert a scalar at the given position (starting from 0) in a vector. If the index is outside of the range the behavior is undefined.
+    unsafeInsertVector     :: v -> Elem v -> Int -> v
+    -- | Pack some elements to a vector.
+    packVector       :: ElemTuple v -> v
+    -- | Unpack a vector.
+    unpackVector     :: v -> ElemTuple v
+
+instance SIMDVector (SIMDPACK Float) where
+    type Elem (SIMDPACK Float) = Float
+    type ElemTuple (SIMDPACK Float) = (Float, Float, Float, Float)
+    nullVector         = broadcastVector 0
+    vectorSize  _      = 4
+    elementSize _      = 4
+    broadcastVector    = broadcastFloatX4
+    unsafeInsertVector = unsafeInsertFloatX4
+    packVector         = packFloatX4
+    unpackVector       = unpackFloatX4
+
+{-# INLINE broadcastFloatX4 #-}
+broadcastFloatX4 (F# x) = FloatX4 (broadcastFloatX4# x)
+
+{-# INLINE packFloatX4 #-}
+packFloatX4 (F# x1, F# x2, F# x3, F# x4) = FloatX4 (packFloatX4# (# x1, x2, x3, x4 #))
+
+{-# INLINE unpackFloatX4 #-}
+unpackFloatX4 (FloatX4 m1) = case unpackFloatX4# m1 of
+    (# x1, x2, x3, x4 #) -> (F# x1, F# x2, F# x3, F# x4)
+
+{-# INLINE unsafeInsertFloatX4 #-}
+unsafeInsertFloatX4 (FloatX4 m1) (F# y) _i@(I# ip) = FloatX4 (insertFloatX4# m1 y (ip -# 0#))

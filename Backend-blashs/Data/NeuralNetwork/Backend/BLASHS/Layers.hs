@@ -123,7 +123,7 @@ instance Component (RunLayer C) where
       feature f b = do
         mat <- newDenseMatrix outr outc
         V.zipWithM_ (\a b -> corr2 pd a b (mat <<+)) f inp
-        mat <<= Apply (+ konst b)
+        mat <<= Apply (plus (konst b))
         return mat
   output (CTrace (_,!a)) = a
   backward (Conv fs bs pd) (CTrace (iv, av)) !odelta rate = do

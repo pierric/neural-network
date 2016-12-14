@@ -138,12 +138,12 @@ instance (Numeric a, V.Storable a, SIMDable a) => AssignTo DenseVector a where
   (DenseVector v) <<= (DenseVector x :.* DenseVector y) =
     let sz = V.length v
     in assert (sz == V.length x && sz == V.length y) $
-       hadamard (*) v x y
+       hadamard times v x y
 
   (DenseVector v) <<= (DenseVector x :.+ DenseVector y) =
     let sz = V.length v
     in assert (sz == V.length x && sz == V.length y) $
-       hadamard (+) v x y
+       hadamard plus v x y
 
   (DenseVector v) <<= Scale s =
     V.unsafeWith v (\pv -> scal (V.length v) s pv 1)
@@ -185,10 +185,10 @@ gemv_helper trans row col alpha x lda y beta v =
 
 instance (Numeric a, V.Storable a, SIMDable a) => AssignTo DenseMatrix a where
   (DenseMatrix vr vc v) <<= (DenseMatrix xr xc x :.* DenseMatrix yr yc y) =
-    assert (vr == xr && vr == yr && vc == xc && vc == yc) $ hadamard (*) v x y
+    assert (vr == xr && vr == yr && vc == xc && vc == yc) $ hadamard times v x y
 
   (DenseMatrix vr vc v) <<= (DenseMatrix xr xc x :.+ DenseMatrix yr yc y) =
-    assert (vr == xr && vr == yr && vc == xc && vc == yc) $ hadamard (+) v x y
+    assert (vr == xr && vr == yr && vc == xc && vc == yc) $ hadamard plus v x y
 
   (DenseMatrix r c v) <<= Scale s =
     let sz = V.length v
