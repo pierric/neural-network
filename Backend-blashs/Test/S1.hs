@@ -8,7 +8,7 @@ import Test.Gen
 import Test.Utils
 
 main = hspec $ do
-  describe "Corr" $ do
+  describe "Corr Single" $ do
     it "implements corr2 correct.0" $ do
       forAll (pair (squared_real_matrices 3) (squared_real_matrices 4)) $
         \(m1, m2) -> ioProperty $ do
@@ -29,6 +29,19 @@ main = hspec $ do
         \(p, (m1, m2)) -> ioProperty $ do
           r <- test_corr2 p m1 m2
           return $ good_corr2 p m1 m2 `eqShowWhenFail` r
+  describe "Corr Many" $ do
+    it "with 2 kernels" $ do
+      forAll (pair (sequence $ replicate 2 $ squared_real_matrices 3) (squared_real_matrices 7)) $
+        \(m1s, m2) -> ioProperty $ do
+          rs <- test_corr2_arr 2 m1s m2
+          return $ conjoin $ zipWith (\m r -> good_corr2 2 m m2 `eqShowWhenFail` r) m1s rs
+    it "with 5 kernels" $ do
+      forAll (pair (sequence $ replicate 4 $ squared_real_matrices 15) (squared_real_matrices 88)) $
+        \(m1s, m2) -> ioProperty $ do
+          rs <- test_corr2_arr 2 m1s m2
+          ss <- return $ map (\m -> good_corr2 2 m m2) m1s
+          return $ conjoin $ zipWith eq rs ss
+
 eqShowWhenFail m1 m2 =
     whenFail (do let va = flatten m1
                  let vb = flatten m2
