@@ -6,7 +6,9 @@ import Control.Monad
 import qualified Data.NeuralNetwork.Backend.BLASHS.Utils as U
 import qualified Numeric.LinearAlgebra as L
 import Numeric.LinearAlgebra.Devel
+import qualified Data.Vector as BV
 import qualified Data.Vector.Storable as V
+import qualified Data.Vector.Storable.Mutable as MV
 import System.IO.Unsafe
 
 asHM (U.DenseMatrix r c v) = L.reshape c $ unsafePerformIO $ V.freeze v
@@ -26,13 +28,29 @@ good_corr2 p k m | w > s     = good_corr2 p m k
 
 test_corr2 :: Int -> L.Matrix Float -> L.Matrix Float -> IO (L.Matrix Float)
 test_corr2 p k m | w > s     = test_corr2 p m k
-                 | otherwise = do x@(U.DenseMatrix _ _ vx) <- U.newDenseMatrix r c
+                 | otherwise = do x@(U.DenseMatrixArray _ _ _ vx) <- U.newDenseMatrixArray 1 r c
                                   k' <- U.DenseMatrix w h <$> V.thaw (flatten k)
                                   m' <- U.DenseMatrix s t <$> V.thaw (flatten m)
-                                  U.corr2 p k' m' (x U.<<=)
+                                  U.corr2 p (BV.singleton k') m' (x U.<<=)
                                   reshape c <$> V.freeze vx
   where
     (w,h) = L.size k
+    (s,t) = L.size m
+    (r,c) = (s-w+2*p+1, t-h+2*p+1)
+
+test_corr2_arr :: Int -> [L.Matrix Float] -> L.Matrix Float -> IO [L.Matrix Float]
+test_corr2_arr p ks m = do x@(U.DenseMatrixArray _ _ _ vx) <- U.newDenseMatrixArray n r c
+                           print ("test", n, r, c, MV.length vx)
+                           ks' <- mapM (\k -> U.DenseMatrix w h <$> V.thaw (flatten k)) ks
+                           m'  <- U.DenseMatrix s t <$> V.thaw (flatten m)
+                           U.corr2 p (BV.fromList ks') m' (x U.<<=)
+                           let vm = U.denseMatrixArrayToVector x
+                           vhm <- BV.mapM (\(U.DenseMatrix _ _ vx) -> reshape c <$> V.freeze vx) vm
+                           return $ BV.toList vhm
+
+  where
+    n     = length ks
+    (w,h) = L.size (head ks)
     (s,t) = L.size m
     (r,c) = (s-w+2*p+1, t-h+2*p+1)
 

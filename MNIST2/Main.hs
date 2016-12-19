@@ -16,14 +16,14 @@ import System.IO.Unsafe
 import Parser
 
 main = do x <- runExceptT $ compile ByBLASHS (In2D 28 28 :++
-                                              -- Convolution 2 5 2 :++ MaxPooling 2 :++
-                                              -- Convolution 8 5 2 :++ MaxPooling 2 :++
+                                              Convolution 4 7 3 :++ MaxPooling 2 :++
                                               Reshape2DAs1D :++
-                                              FullConnect 256 :++
+                                              FullConnect 256 :++ FullConnect 64 :++
                                               FullConnect 10)
           case x of
             Left _ -> putStrLn "Error."
-            Right cnn -> debug cnn -- dotrain cnn >>= dotest
+            Right cnn -> -- dotrain cnn >>= dotest
+                         debug cnn
 
 debug :: (Component n, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
       => n -> IO ()
@@ -62,7 +62,12 @@ dotrain nn = do
   dataset <- trainingData >>= mapM preprocess . uncurry zip
   putStrLn "Load test data."
   putStrLn "Learning."
-  iterateM 20 nn (online 0.00008 dataset)
+  cnt <- newIORef 0 :: IO (IORef Int)
+  let dispAndInc = do
+        i <- readIORef cnt
+        writeIORef cnt (i+1)
+        putStrLn ("Iteration " ++ show i)
+  iterateM 15 nn ((dispAndInc >>) . online 0.002 dataset)
 
 dotest :: (Component n, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
        => n -> IO ()
@@ -73,6 +78,11 @@ dotest !nn = do
     expect <- mapM (postprocess . snd) testset
     let (co,wr) = partition (uncurry (==)) $ zip result expect
     putStrLn $ printf "correct: %d, wrong: %d" (length co) (length wr)
+    putStrLn $ "First 10 tests:"
+    flip mapM_ (take 10 testset) $ \(ds,ev) -> do
+      pv <- forward nn ds
+      prettyResult pv >>= putStrLn . ("+" ++ )
+      prettyResult ev >>= putStrLn . ("*" ++ )
 
 online :: (Component n, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
        => Float -> [(Inp n, Out n)] -> n -> IO n

@@ -43,7 +43,7 @@ data RunLayer :: * -> * where
   -- feature:  matrix of (s x t), # of features: m x n
   -- padding:  number of 0s padded at each side of channel
   -- biases:   bias for each output, # of biases: n
-  Conv  :: !(V.Vector (V.Vector (DenseMatrix R))) -> !(V.Vector R) -> Int -> RunLayer C
+  Conv  :: !(V.Vector (DenseMatrixArray R)) -> !(V.Vector R) -> Int -> RunLayer C
   -- Reshape from channels of matrix to a single vector
   -- input:  m channels of 2D matrices
   --         assuming that all matrices are of the same size a x b
@@ -94,12 +94,12 @@ instance Component (RunLayer A) where
   forwardT _ !inp = do
     let !b = V.length inp
         (!r,!c) = size (V.head inp)
-    o <- concatV $ map m2v $ V.toList inp
+    o <- concatV $ V.map m2v inp
     return $ ReshapeTrace (b, r, c, o)
   output (ReshapeTrace (_,_,_,a)) = a
-  backward a (ReshapeTrace (b,r,c,_)) !odelta _ =
+  backward a (ReshapeTrace (b,r,c,_)) !odelta _ = do
     let !idelta = V.fromList $ map (v2m r c) $ splitV b (r*c) odelta
-    in return $ (a, idelta)
+    return $ (a, idelta)
 
 instance Component (RunLayer C) where
   type Run (RunLayer C) = IO
@@ -107,40 +107,38 @@ instance Component (RunLayer C) where
   type Out (RunLayer C) = V.Vector (DenseMatrix R)
   -- trace is (input, convoluted output)
   newtype Trace (RunLayer C) = CTrace (Inp (RunLayer C), Out (RunLayer C))
-  forwardT (Conv fs bs pd) !inp = do
-    ov <- V.zipWithM feature (tr fs) bs
+  forwardT (Conv fss bs pd) !inp = do
+    ma <- newDenseMatrixArray outn outr outc
+    V.zipWithM_ (\fs i -> corr2 pd (denseMatrixArrayToVector fs) i (ma <<+)) fss inp
+    let ov = denseMatrixArrayToVector ma
+    V.zipWithM_ (\m b -> m <<= Apply (plus (konst b))) ov bs
     return $ CTrace (inp, ov)
     where
-      -- transpose the features matrix
-      tr :: V.Vector (V.Vector a) -> V.Vector (V.Vector a)
-      tr uv = let n   = V.length (V.head uv)
-                  !vu = V.map (\i -> V.map (V.! i) uv) $ V.enumFromN 0 n
-              in vu
-      (outr,outc) = let (x,y) = size (V.head inp)
-                        (u,v) = size (V.head $ V.head fs)
+      outn = V.length bs
+      (outr,outc) = let (x,y)   = size (V.head inp)
+                        (_,u,v) = size (V.head fss)
                     in (x+2*pd-u+1, y+2*pd-v+1)
-      feature :: V.Vector (DenseMatrix R) -> R -> Run (RunLayer C) (DenseMatrix R)
-      feature f b = do
-        mat <- newDenseMatrix outr outc
-        V.zipWithM_ (\a b -> corr2 pd a b (mat <<+)) f inp
-        mat <<= Apply (plus (konst b))
-        return mat
   output (CTrace (_,!a)) = a
-  backward (Conv fs bs pd) (CTrace (iv, av)) !odelta rate = do
-    V.zipWithM_ (\flts chn -> do
-                  -- chn:  one input channel
-                  -- flts: all features used for chn
-                  V.zipWithM_ (\f d -> corr2 pd chn d ((f <<+) . Scale' (negate rate))) flts odelta
-                ) fs iv
+  backward (Conv fss bs pd) (CTrace (iv, av)) !odelta rate = do
+    let (ir,ic) = size (V.head iv)
+    idelta <- newDenseMatrixArray (V.length iv) ir ic
+    fss'   <- transpose fss
+    V.zipWithM_ (\fs d -> conv2 pd fs d (idelta <<+)) fss' odelta
     !nb <- V.zipWithM (\b d -> do s <- sumElements d
                                   return $ b + negate rate * s
                       ) bs odelta
-    let (ir,ic) = size (V.head iv)
-    !idelta <- V.forM fs (\f -> do mat <- newDenseMatrix ir ic
-                                   V.zipWithM_ (\f d -> conv2 pd f d (mat <<+)) f odelta
-                                   return mat)
-    return $ (Conv fs nb pd, idelta)
-
+    -- when updating kernels, it originally should be
+    -- conv2 pd iv od. But we use the equalivalent form
+    -- conv2 (|od|-|iv|+pd) od iv. Because there are typically
+    -- more output channels than input.
+    let pd' = let (or,_) = size (V.head odelta) in or - ir + pd
+    V.zipWithM_ (\fs i -> do
+                  -- i:  one input channel
+                  -- fs: all features used for chn
+                  corr2 pd odelta i ((fs <<+) . Scale' (negate rate))
+                ) fss iv
+    let !ideltaV = denseMatrixArrayToVector idelta
+    return $ (Conv fss nb pd, ideltaV)
 instance (Component (RunLayer a),
           Component (RunLayer b),
           Run (RunLayer a) ~ IO,
@@ -224,10 +222,8 @@ newFLayer :: Int                -- number of input values
           -> IO (RunLayer F)    -- new layer
 newFLayer m n =
     withSystemRandom . asGenIO $ \gen -> do
-        -- we build the weights in column major because in the back-propagation
-        -- algo, the computed update to weights is in column major. So it is
-        -- good for performance to keep the matrix always in column major.
-        w <- newDenseMatrixByGen (double2Float <$> normal 0 0.01 gen) m n
+        raw <- newDenseVectorByGen (double2Float <$> normal 0 0.01 gen) (m*n)
+        let w = v2m m n raw
         b <- newDenseVectorConst n 1
         return $ Full w b
 
@@ -238,10 +234,11 @@ newCLayer :: Int                -- number of input channels
           -> IO (RunLayer C)    -- new layer
 newCLayer inpsize outsize sfilter npadding =
   withSystemRandom . asGenIO $ \gen -> do
-      fs <- V.replicateM inpsize $ V.replicateM outsize $
-              newDenseMatrixByGen (double2Float <$> truncNormal 0 0.1 gen) sfilter sfilter
+      fss <- V.replicateM inpsize $ do
+              raw <- newDenseVectorByGen (double2Float <$> truncNormal 0 0.1 gen) (outsize*sfilter*sfilter)
+              return $ v2ma outsize sfilter sfilter raw
       bs <- return $ V.replicate outsize 0.1
-      return $ Conv fs bs npadding
+      return $ Conv fss bs npadding
   where
     truncNormal m s g = do
       x <- standard g
