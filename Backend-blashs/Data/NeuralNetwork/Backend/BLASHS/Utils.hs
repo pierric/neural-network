@@ -24,7 +24,7 @@ data DenseMatrix a = DenseMatrix {-# UNPACK #-}!Int {-# UNPACK #-}!Int {-# UNPAC
 data DenseMatrixArray a = DenseMatrixArray {-# UNPACK #-}!Int {-# UNPACK #-}!Int {-# UNPACK #-}!Int {-# UNPACK #-}!(V.IOVector a)
 
 newDenseVector :: V.Storable a => Int -> IO (DenseVector a)
-newDenseVector sz = DenseVector <$> V.unsafeNew sz
+newDenseVector sz = DenseVector <$> V.new sz
 
 newDenseVectorCopy :: V.Storable a => DenseVector a -> IO (DenseVector a)
 newDenseVectorCopy (DenseVector v) = V.clone v >>= return . DenseVector
@@ -220,8 +220,8 @@ instance (Numeric a, V.Storable a, SIMDable a) => AssignTo DenseVector a where
 
 instance (Numeric a, V.Storable a, SIMDable a) => AssignTo DenseMatrix a where
   (DenseMatrix vr vc v) <<= (DenseMatrix xr xc x :<> DenseMatrix yr yc y) =
-    assert (xr == yr && vc == xc && vr == yc) $ do
-      gemm_helper Trans NoTrans xr yr xc 1.0 x xc y yc 0.0 v vc
+    assert (xc == yc && vc == xr && vr == yr) $ do
+      gemm_helper Trans NoTrans xr yr xc 1.0 x xc y xc 0.0 v xr
 
   (DenseMatrix vr vc v) <<= (DenseMatrix xr xc x :.* DenseMatrix yr yc y) =
     assert (vr == xr && vr == yr && vc == xc && vc == yc) $ hadamard times v x y
@@ -237,12 +237,14 @@ instance (Numeric a, V.Storable a, SIMDable a) => AssignTo DenseMatrix a where
   (DenseMatrix r c v) <<= Apply f = (DenseVector v) <<= Apply f
 
   (DenseMatrix vr vc v) <<= Scale' a (DenseMatrix xr xc x :<> DenseMatrix yr yc y) =
-    assert (xr == yr && vc == xc && vr == yc) $ gemm_helper Trans NoTrans xr yr xc a x xc y yc 0.0 v vc
+    assert (xc == yc && vc == xr && vr == yr) $ do
+      gemm_helper Trans NoTrans xr yr xc a x xc y xc 0.0 v xr
 
   _ <<= _ = error "Unsupported Op [Matrix <<=]."
 
   (DenseMatrix vr vc v) <<+ (DenseMatrix xr xc x :<> DenseMatrix yr yc y) =
-    assert (xr == yr && vc == xc && vr == yc) $ gemm_helper Trans NoTrans xr yr xc 1.0 x xc y yc 1.0 v vc
+    assert (xc == yc && vc == xr && vr == yr) $ do
+      gemm_helper Trans NoTrans xr yr xc 1.0 x xc y xc 1.0 v xr
 
   (DenseMatrix vr vc v) <<+ (DenseVector x :## DenseVector y) =
     let m = V.length x
@@ -254,7 +256,8 @@ instance (Numeric a, V.Storable a, SIMDable a) => AssignTo DenseMatrix a where
          geru RowMajor m n 1.0 px 1 py 1 pv n)))
 
   (DenseMatrix vr vc v)  <<+ Scale' a (DenseMatrix xr xc x :<> DenseMatrix yr yc y) =
-    assert (xr == yr && vc == xc && vr == yc) $ gemm_helper Trans NoTrans xr yr xc a x xc y yc 1.0 v vc
+    assert (xc == yc && vc == xr && vr == yr) $ do
+      gemm_helper Trans NoTrans xr yr xc a x xc y xc 1.0 v xr
 
   _ <<+ _ = error "Unsupported Op [Matrix <<+]."
 
@@ -351,7 +354,7 @@ fill wrk@(DenseMatrix _ _ vwrk) m u v kr kc = do
 pool :: Int -> DenseMatrix Float -> IO (DenseVector Int, DenseMatrix Float)
 pool 1 mat = do
   let (r,c) = size mat
-  vi <- newDenseVectorConst (r*c) 0
+  vi <- newDenseVector (r*c)
   return (vi, mat)
 pool stride mat = do
   mxi <- newDenseVector (r'*c')

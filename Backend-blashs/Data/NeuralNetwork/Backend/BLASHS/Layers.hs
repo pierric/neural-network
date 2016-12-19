@@ -123,7 +123,14 @@ instance Component (RunLayer C) where
     let (ir,ic) = size (V.head iv)
     idelta <- newDenseMatrixArray (V.length iv) ir ic
     fss'   <- transpose fss
-    V.zipWithM_ (\fs d -> conv2 pd fs d (idelta <<+)) fss' odelta
+    -- a + 2p - k + 1 = b
+    -- b + 2q - a + 1 = a
+    -- -------------------
+    --    q = k - p
+    -- where
+    --   a = |i|, k = |f|, b = |o|
+    let qd = let (kr,_) = size (V.head $ V.head fss') in kr-1-pd
+    V.zipWithM_ (\fs d -> conv2 qd fs d (idelta <<+)) fss' odelta
     !nb <- V.zipWithM (\b d -> do s <- sumElements d
                                   return $ b + negate rate * s
                       ) bs odelta
@@ -131,11 +138,17 @@ instance Component (RunLayer C) where
     -- conv2 pd iv od. But we use the equalivalent form
     -- conv2 (|od|-|iv|+pd) od iv. Because there are typically
     -- more output channels than input.
-    let pd' = let (or,_) = size (V.head odelta) in or - ir + pd
+    -- a + 2p - b + 1 = c
+    -- b + 2q - a + 1 = c
+    -- ------------------
+    --    q = a - b + p
+    -- where
+    --  a = |o|, b = |i|, c = |f|
+    let qd = let (or,_) = size (V.head odelta) in or - ir + pd
     V.zipWithM_ (\fs i -> do
                   -- i:  one input channel
                   -- fs: all features used for chn
-                  corr2 pd odelta i ((fs <<+) . Scale' (negate rate))
+                  corr2 qd odelta i ((fs <<+) . Scale' (negate rate))
                 ) fss iv
     let !ideltaV = denseMatrixArrayToVector idelta
     return $ (Conv fss nb pd, ideltaV)
