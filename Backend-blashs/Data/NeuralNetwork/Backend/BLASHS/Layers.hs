@@ -124,14 +124,19 @@ instance Component (RunLayer C) where
     idelta <- newDenseMatrixArray (V.length iv) ir ic
     fss'   <- transpose fss
     V.zipWithM_ (\fs d -> conv2 pd fs d (idelta <<+)) fss' odelta
+    !nb <- V.zipWithM (\b d -> do s <- sumElements d
+                                  return $ b + negate rate * s
+                      ) bs odelta
+    -- when updating kernels, it originally should be
+    -- conv2 pd iv od. But we use the equalivalent form
+    -- conv2 (|od|-|iv|+pd) od iv. Because there are typically
+    -- more output channels than input.
+    let pd' = let (or,_) = size (V.head odelta) in or - ir + pd
     V.zipWithM_ (\fs i -> do
                   -- i:  one input channel
                   -- fs: all features used for chn
                   corr2 pd odelta i ((fs <<+) . Scale' (negate rate))
                 ) fss iv
-    !nb <- V.zipWithM (\b d -> do s <- sumElements d
-                                  return $ b + negate rate * s
-                      ) bs odelta
     let !ideltaV = denseMatrixArrayToVector idelta
     return $ (Conv fss nb pd, ideltaV)
 instance (Component (RunLayer a),

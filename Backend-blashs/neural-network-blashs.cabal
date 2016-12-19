@@ -60,11 +60,11 @@ test-suite s1
   build-depends:      hspec, QuickCheck, base, hmatrix, vector, blas-hs, neural-network-base
   default-language:   Haskell2010
 
-executable s2
-  main-is:            Test/S2.hs
-  hs-source-dirs:     ., novec
-  other-modules:      Data.NeuralNetwork.Backend.BLASHS.Utils,
-                      Data.NeuralNetwork.Backend.BLASHS.SIMD
-                      Test.Utils, Test.Gen
-  build-depends:      hspec, QuickCheck, base, hmatrix, vector, blas-hs, neural-network-base
-  default-language:   Haskell2010
+-- executable s2
+--   main-is:            Test/S2.hs
+--   hs-source-dirs:     ., novec
+--   other-modules:      Data.NeuralNetwork.Backend.BLASHS.Utils,
+--                       Data.NeuralNetwork.Backend.BLASHS.SIMD
+--                       Test.Utils, Test.Gen
+--   build-depends:      hspec, QuickCheck, base, hmatrix, vector, blas-hs, neural-network-base
+--   default-language:   Haskell2010

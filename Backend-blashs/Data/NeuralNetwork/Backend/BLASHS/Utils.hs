@@ -38,7 +38,7 @@ newDenseVectorByGen g n = do
   return $ DenseVector vals
 
 newDenseMatrix :: V.Storable a => Int -> Int -> IO (DenseMatrix a)
-newDenseMatrix r c = DenseMatrix r c <$> V.unsafeNew (r*c)
+newDenseMatrix r c = DenseMatrix r c <$> V.new (r*c)
 
 newDenseMatrixConst:: V.Storable a => Int -> Int -> a -> IO (DenseMatrix a)
 newDenseMatrixConst r c v = V.replicate (r*c) v >>= return . DenseMatrix r c
@@ -47,7 +47,7 @@ newDenseMatrixCopy :: V.Storable a => DenseMatrix a -> IO (DenseMatrix a)
 newDenseMatrixCopy (DenseMatrix r c v) = V.clone v >>= return . DenseMatrix r c
 
 newDenseMatrixArray :: V.Storable a => Int -> Int -> Int -> IO (DenseMatrixArray a)
-newDenseMatrixArray n r c = DenseMatrixArray n r c <$> V.unsafeNew (n*r*c)
+newDenseMatrixArray n r c = DenseMatrixArray n r c <$> V.new (n*r*c)
 
 denseMatrixArrayAt :: V.Storable a => DenseMatrixArray a -> Int -> DenseMatrix a
 denseMatrixArrayAt (DenseMatrixArray n r c v) i =
@@ -62,7 +62,6 @@ denseMatrixArrayFromVector vm = do
   let n = BV.length vm
       DenseMatrix r c (V.MVector _ ptr0) = BV.head vm
   DenseVector raw <- concatV (BV.map m2v vm)
-  -- print ("denseMatrixArrayFromVector", V.length raw)
   return $ DenseMatrixArray n r c raw
 
 v2m r c (DenseVector v) = DenseMatrix r c v
@@ -87,10 +86,8 @@ concatV vs = do
   size <- readIORef size
   if cont
     then do
-      -- print ("concatV: cont", size)
       return $ DenseVector $ V.unsafeFromForeignPtr0 ptr0 size
     else do
-      -- print ("concatV: not cont", size)
       nvec@(DenseVector rv) <- newDenseVector size
       go rv vs
       return nvec
@@ -224,7 +221,6 @@ instance (Numeric a, V.Storable a, SIMDable a) => AssignTo DenseVector a where
 instance (Numeric a, V.Storable a, SIMDable a) => AssignTo DenseMatrix a where
   (DenseMatrix vr vc v) <<= (DenseMatrix xr xc x :<> DenseMatrix yr yc y) =
     assert (xr == yr && vc == xc && vr == yc) $ do
-      -- print ((vr,vc,V.length v), (xr,xc,V.length x), (yr,yc,V.length y))
       gemm_helper Trans NoTrans xr yr xc 1.0 x xc y yc 0.0 v vc
 
   (DenseMatrix vr vc v) <<= (DenseMatrix xr xc x :.* DenseMatrix yr yc y) =
@@ -300,10 +296,9 @@ corr2 p ks m fun = do
       u       = mr - kr + 2*p + 1
       v       = mc - kc + 2*p + 1
   zpd <- zero m mr mc p
-  wrk <- newDenseMatrixConst (u*v) (kr*kc) 0
+  wrk <- newDenseMatrix (u*v) (kr*kc)
   fill wrk zpd u v kr kc
   DenseMatrixArray n r c v <- denseMatrixArrayFromVector ks
-  -- print ("corr2", n, r, c, V.length v)
   fun $ UnsafeM2MA $ wrk :<> DenseMatrix n (r*c) v
 
 conv2 :: (V.Storable a, Numeric a)
@@ -315,24 +310,24 @@ conv2 p ks m fun = do
       u       = mr - kr + 2*p + 1
       v       = mc - kc + 2*p + 1
   zpd <- zero m mr mc p
-  wrk <- newDenseMatrixConst (u*v) (kr*kc) 0
+  wrk <- newDenseMatrix (u*v) (kr*kc)
   fill wrk zpd u v kr kc
+  -- copy the kernels, and reverse each.
   let nk      = BV.length ks
-  knl@(DenseMatrixArray n r c v) <- newDenseMatrixArray nk kr kc
+  knl@(DenseMatrixArray _ _ _ v) <- newDenseMatrixArray nk kr kc
   forM_ [0..nk-1] $ \i -> do
     let DenseMatrix _ _ d = denseMatrixArrayAt knl i
     let DenseMatrix _ _ s = ks BV.! (nk-1-i)
     V.unsafeCopy d s
   reverseV v
-  -- print ("conv2", BV.length ks)
-  fun $ UnsafeM2MA $ wrk :<> DenseMatrix n (r*c) v
+  fun $ UnsafeM2MA $ wrk :<> DenseMatrix nk (kr*kc) v
   where
     reverseV v = let e = V.length v
                      m = e `div` 2
                  in forM_ [0..m] (\i -> V.unsafeSwap v i (e-1-i))
 
 zero m mr mc p = do
-  zpd <- newDenseMatrixConst (mr+2*p) (mc+2*p) 0
+  zpd <- newDenseMatrix (mr+2*p) (mc+2*p)
   forM_ [0..mr-1] $ \i -> do
     let t = sliceM zpd (p+i, p)
         s = sliceM m   (  i, 0)
@@ -389,7 +384,7 @@ pool stride mat = do
 -- assuming idx and mat are of the same size
 unpool :: Int -> DenseVector Int -> DenseMatrix Float -> IO (DenseMatrix Float)
 unpool stride idx mat = do
-  mat' <- newDenseMatrixConst r' c' 0
+  mat' <- newDenseMatrix r' c'
   forM_ [0..r-1] $ \i -> do
     forM_ [0..c-1] $ \j -> do
       pos <- unsafeReadV idx (i*c+j)
@@ -439,5 +434,4 @@ gemm_helper transA transB rowA colB colA alpha x xlda y ylda beta v vlda =
   V.unsafeWith x (\px ->
   V.unsafeWith y (\py ->
   V.unsafeWith v (\pv -> do
-    -- print ("gemm", rowA, colB, colA, xlda, ylda, vlda)
     gemm ColMajor transA transB rowA colB colA alpha px xlda py ylda beta pv vlda)))
