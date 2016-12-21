@@ -47,13 +47,13 @@ data S a b
 
 -- | basic components of neural network
 data RunLayer :: * -> * where
-  -- Densely connected layer
+  -- | Densely connected layer
   -- input:   vector of size m
   -- output:  vector of size n
   -- weights: matrix of size m x n
   -- biases:  vector of size n
   Full :: !(DenseMatrix R) -> !(DenseVector R) -> RunLayer F
-  -- convolutional layer
+  -- | Convolutional layer
   -- input:  channels of 2D floats, of the same size (a x b), # of input channels:  m
   -- output: channels of 2D floats, of the same size (c x d), # of output channels: n
   --         where c = a + 2*padding + 1 - s
@@ -62,23 +62,23 @@ data RunLayer :: * -> * where
   -- padding:  number of 0s padded at each side of channel
   -- biases:   bias for each output, # of biases: n
   Conv  :: !(V.Vector (DenseMatrixArray R)) -> !(V.Vector R) -> Int -> RunLayer C
-  -- Reshape from channels of matrix to a single vector
+  -- | Reshape from channels of matrix to a single vector
   -- input:  m channels of 2D matrices
   --         assuming that all matrices are of the same size a x b
   -- output: 1D vector of the concatenation of all input channels
   --         its size: m x a x b
   As1D  :: RunLayer A
-  -- max pooling layer
+  -- | max pooling layer
   -- input:  channels of 2D floats, of the same size (a x b), # of input channels:  m
   --         assuming that a and b are both multiple of stride
   -- output: channels of 2D floats, of the same size (c x d), # of output channels: m
   --         where c = a / stride
   --               d = b / stride
   MaxP :: Int -> RunLayer P
-  -- Activator
+  -- | Activator
   -- the input can be either a 1D vector, 2D matrix, or channels of either.
   Activation :: (SIMDPACK R -> SIMDPACK R, SIMDPACK R -> SIMDPACK R) -> RunLayer (T c)
-  -- stacking two components a and b
+  -- | stacking two components a and b
   -- the output of a should matches the input of b
   Stack :: !(RunLayer a) -> !(RunLayer b) -> RunLayer (S a b)
 
@@ -248,9 +248,10 @@ instance Component (RunLayer P) where
     where
       gen (!si,!iv,_) od = unpool stride iv od
 
-newFLayer :: Int                -- number of input values
-          -> Int                -- number of neurons (output values)
-          -> IO (RunLayer F)    -- new layer
+-- | create a new full connect component
+newFLayer :: Int                -- ^ number of input values
+          -> Int                -- ^ number of neurons (output values)
+          -> IO (RunLayer F)    -- ^ the new layer
 newFLayer m n =
     withSystemRandom . asGenIO $ \gen -> do
         raw <- newDenseVectorByGen (double2Float <$> normal 0 0.01 gen) (m*n)
@@ -258,11 +259,12 @@ newFLayer m n =
         b <- newDenseVectorConst n 1
         return $ Full w b
 
-newCLayer :: Int                -- number of input channels
-          -> Int                -- number of output channels
-          -> Int                -- size of each feature
-          -> Int                -- size of padding
-          -> IO (RunLayer C)    -- new layer
+-- | create a new convolutional component
+newCLayer :: Int                -- ^ number of input channels
+          -> Int                -- ^ number of output channels
+          -> Int                -- ^ size of each feature
+          -> Int                -- ^ size of padding
+          -> IO (RunLayer C)    -- ^ the new layer
 newCLayer inpsize outsize sfilter npadding =
   withSystemRandom . asGenIO $ \gen -> do
       fss <- V.replicateM inpsize $ do
