@@ -1,7 +1,43 @@
+------------------------------------------------------------
+-- |
+-- Module      :  Data.NeuralNetwork.Backend.BLASHS.Utils
+-- Description :  A backend for neuralnetwork with blas-hs.
+-- Copyright   :  (c) 2016 Jiasen Wu
+-- License     :  BSD-style (see the file LICENSE)
+-- Maintainer  :  Jiasen Wu <jiasenwu@hotmail.com>
+-- Stability   :  stable
+-- Portability :  portable
+--
+--
+-- This module supplies a high level abstraction of the rather
+-- low-level blas-hs interfaces.
+------------------------------------------------------------
 {-# LANGUAGE TypeFamilies, TypeOperators, GADTs #-}
 {-# LANGUAGE MultiParamTypeClasses, FlexibleInstances #-}
 {-# LANGUAGE BangPatterns #-}
-module Data.NeuralNetwork.Backend.BLASHS.Utils where
+module Data.NeuralNetwork.Backend.BLASHS.Utils (
+  DenseVector(..),
+  DenseMatrix(..),
+  DenseMatrixArray(..),
+  newDenseVector,
+  newDenseVectorCopy,
+  newDenseVectorConst,
+  newDenseVectorByGen,
+  newDenseMatrix,
+  newDenseMatrixConst,
+  newDenseMatrixCopy,
+  newDenseMatrixArray,
+  Size(..),
+  denseVectorToVector,
+  denseVectorConcat,
+  denseVectorSplit,
+  denseMatrixArrayAt,
+  denseMatrixArrayToVector,
+  denseMatrixArrayFromVector,
+  v2m, m2v, v2ma, ma2v,
+  Op(..), AssignTo(..),
+  sumElements, corr2, conv2, pool, unpool, transpose
+) where
 
 import Blas.Generic.Unsafe
 import Blas.Primitive.Types
@@ -15,64 +51,93 @@ import Data.IORef
 import Foreign.Marshal.Array (advancePtr)
 import Data.NeuralNetwork.Backend.BLASHS.SIMD
 
--- mutable vector type
+-- | mutable vector type
 newtype DenseVector a = DenseVector (V.IOVector a)
 
--- mutable matrix type
+-- | mutable matrix type (row-major)
 data DenseMatrix a = DenseMatrix {-# UNPACK #-}!Int {-# UNPACK #-}!Int {-# UNPACK #-}!(V.IOVector a)
 
+-- | array of DenseMatrix, which are identical in size.
 data DenseMatrixArray a = DenseMatrixArray {-# UNPACK #-}!Int {-# UNPACK #-}!Int {-# UNPACK #-}!Int {-# UNPACK #-}!(V.IOVector a)
 
+-- | create a new 'DenseVector'
 newDenseVector :: V.Storable a => Int -> IO (DenseVector a)
 newDenseVector sz = DenseVector <$> V.new sz
 
+-- | create a copy 'DenseVector' from another
 newDenseVectorCopy :: V.Storable a => DenseVector a -> IO (DenseVector a)
 newDenseVectorCopy (DenseVector v) = V.clone v >>= return . DenseVector
 
+-- | create a new 'DenseVector' of some constant
 newDenseVectorConst:: V.Storable a => Int -> a -> IO (DenseVector a)
 newDenseVectorConst n v = V.replicate n v >>= return . DenseVector
 
-newDenseVectorByGen :: IO Float -> Int -> IO (DenseVector Float)
+-- | create a new 'DenseVector' by a random generator
+newDenseVectorByGen :: V.Storable a => IO a -> Int -> IO (DenseVector a)
 newDenseVectorByGen g n = do
   vals <- V.replicateM n g
   return $ DenseVector vals
 
-newDenseMatrix :: V.Storable a => Int -> Int -> IO (DenseMatrix a)
+-- | create a new 'DenseMatrix'
+newDenseMatrix :: V.Storable a => Int -- ^ number of rows
+                               -> Int -- ^ number of columns
+                               -> IO (DenseMatrix a)
 newDenseMatrix r c = DenseMatrix r c <$> V.new (r*c)
 
+-- | create a new 'DenseMatrix' of some constant
 newDenseMatrixConst:: V.Storable a => Int -> Int -> a -> IO (DenseMatrix a)
 newDenseMatrixConst r c v = V.replicate (r*c) v >>= return . DenseMatrix r c
 
+-- | create a copy 'DenseMatrix' from another
 newDenseMatrixCopy :: V.Storable a => DenseMatrix a -> IO (DenseMatrix a)
 newDenseMatrixCopy (DenseMatrix r c v) = V.clone v >>= return . DenseMatrix r c
 
-newDenseMatrixArray :: V.Storable a => Int -> Int -> Int -> IO (DenseMatrixArray a)
+-- | create a new 'DenseMatrixArray'
+newDenseMatrixArray :: V.Storable a => Int -- ^ number of DenseMatrix
+                                    -> Int -- ^ number of rows
+                                    -> Int -- ^ number of columns
+                                    -> IO (DenseMatrixArray a)
 newDenseMatrixArray n r c = DenseMatrixArray n r c <$> V.new (n*r*c)
 
+-- | get the 'DenseMatrix' from 'DenseMatrixArray' at some position
 denseMatrixArrayAt :: V.Storable a => DenseMatrixArray a -> Int -> DenseMatrix a
 denseMatrixArrayAt (DenseMatrixArray n r c v) i =
   assert (i >= 0 && i < n) $ let seg = r*c in DenseMatrix r c (V.unsafeSlice (i*seg) seg v)
 
+-- | convert 'DenseMatrixArray' to a vector of 'DenseMatrix' (no copy)
 denseMatrixArrayToVector :: V.Storable a => DenseMatrixArray a -> BV.Vector (DenseMatrix a)
 denseMatrixArrayToVector (DenseMatrixArray n r c v) =
   let seg = r*c in BV.fromList [DenseMatrix r c (V.unsafeSlice (i*seg) seg v) | i <- [0..n-1]]
 
+-- | convert a vector of 'DenseMatrix' to 'DenseMatrixArray'
+-- If all the matrices are orignally placed consecutively in storage, the result
+-- is simply a type-cast. Otherwise, a new storage is obtained, and matrices are
+-- copied.
 denseMatrixArrayFromVector :: V.Storable a => BV.Vector (DenseMatrix a) -> IO (DenseMatrixArray a)
 denseMatrixArrayFromVector vm = do
   let n = BV.length vm
       DenseMatrix r c (V.MVector _ ptr0) = BV.head vm
-  DenseVector raw <- concatV (BV.map m2v vm)
+  DenseVector raw <- denseVectorConcat (BV.map m2v vm)
   return $ DenseMatrixArray n r c raw
 
+-- | type cast from 'DenseVector' to 'DenseMatrix'
 v2m r c (DenseVector v) = DenseMatrix r c v
+-- | type cast from 'DenseMatrix' to 'DenseVector'
 m2v (DenseMatrix _ _ v) = DenseVector v
+-- | type cast from 'DenseVector' to 'DenseMatrixArray'
 v2ma n r c (DenseVector v) = assert (V.length v == n*r*c) $ DenseMatrixArray n r c v
+-- | type cast from 'DenseMatrixArray' to 'DenseVector'
 ma2v (DenseMatrixArray n r c v) = DenseVector v
 
-toListV (DenseVector vs) = SV.unsafeFreeze vs >>= return . SV.toList
+-- | convert a 'DenseVector' to a vector of elements
+denseVectorToVector (DenseVector vs) = SV.unsafeFreeze vs >>= return . BV.convert
 
-concatV :: V.Storable a => BV.Vector (DenseVector a) -> IO (DenseVector a)
-concatV vs = do
+-- | concatenate a vector of 'DenseVector's.
+-- If all the dense-vectors are orignally placed consecutively in storage, the result
+-- is simply a type-cast. Otherwise, a new storage is obtained, and dense-vectors are
+-- copied.
+denseVectorConcat :: V.Storable a => BV.Vector (DenseVector a) -> IO (DenseVector a)
+denseVectorConcat vs = do
   let n = BV.length vs
       DenseVector (V.MVector sz0 ptr0) = BV.head vs
   cont <- newIORef True
@@ -101,14 +166,21 @@ concatV vs = do
           V.unsafeCopy v1 src
           go v2 (BV.tail vs)
 
-splitV :: V.Storable a => Int -> Int -> DenseVector a -> [DenseVector a]
-splitV n c (DenseVector v) = assert (V.length v > n * c) $
-  [DenseVector (V.unsafeSlice (i*c) c v) | i <- [0..n-1]]
+-- | split a 'DenseVector' into a vector of 'DenseVector's.
+denseVectorSplit :: V.Storable a => Int -> Int -> DenseVector a -> BV.Vector (DenseVector a)
+denseVectorSplit n c (DenseVector v) = assert (V.length v > n * c) $
+  BV.map (\i -> DenseVector (V.unsafeSlice (i*c) c v)) $ BV.enumFromN 0 n
 
 sliceM :: V.Storable a => DenseMatrix a -> (Int, Int) -> DenseVector a
 sliceM (DenseMatrix r c d) (x,y) = assert (x>=0 && x<r && y>=0 && y<c) $ DenseVector v
   where
     v = V.unsafeDrop (x*c+y) d
+
+dropV n (DenseVector v) = DenseVector (V.unsafeDrop n v)
+
+copyV (DenseVector v1) (DenseVector v2) len =
+  assert (V.length v1 >= len && V.length v2 >= len) $
+  V.unsafeCopy (V.unsafeTake len v1) (V.unsafeTake len v2)
 
 unsafeReadV :: V.Storable a => DenseVector a -> Int -> IO a
 unsafeReadV (DenseVector v) i = V.unsafeRead v i
@@ -122,12 +194,8 @@ unsafeReadM (DenseMatrix r c v) (i,j) = assert (i < r && j < c) $ V.unsafeRead v
 unsafeWriteM :: V.Storable a => DenseMatrix a -> (Int, Int) -> a -> IO ()
 unsafeWriteM (DenseMatrix r c v) (i,j) a = assert (i < r && j < c) $ V.unsafeWrite v (i*c+j) a
 
-dropV n (DenseVector v) = DenseVector (V.unsafeDrop n v)
-
-copyV (DenseVector v1) (DenseVector v2) len =
-  assert (V.length v1 >= len && V.length v2 >= len) $
-  V.unsafeCopy (V.unsafeTake len v1) (V.unsafeTake len v2)
-
+-- | The Size class provides a interface to tell the dimension of a
+-- dense-vector, dense-matrix, or dense-matrix-array.
 class Size a where
   type Dim a
   size :: a -> Dim a
@@ -144,38 +212,44 @@ instance V.Storable a => Size (DenseMatrixArray a) where
   type Dim (DenseMatrixArray a) = (Int,Int,Int)
   size (DenseMatrixArray n r c v) = assert (V.length v >= n * r * c) $ (n,r,c)
 
-infix 4 :<#, :#>, :##, :.*, :.+
+infix 4 :<#, :#>, :<>, :##, :.*, :.+
 infix 0 <<=, <<+
 
+-- | Operations that abstract the low-level details of blas-hs
 data Op :: (* -> *) -> * -> * where
-  -- vector (by-row) and matrix production
+  -- | vector (as-row) and matrix production
   (:<#) :: DenseVector a -> DenseMatrix a -> Op DenseVector a
-  -- matrix and vector (by-column) product
+  -- | matrix and vector (as-column) product
   (:#>) :: DenseMatrix a -> DenseVector a -> Op DenseVector a
-  -- matrix and matrix product
-  -- the 2nd matrix is transposed before multiplication
+  -- | matrix and matrix product
+  -- This is a specially customized matrix matrix product, for the sake of quick
+  -- convolution. The 1st matrix is transposed before multiplication, and the
+  -- result matrix is stored in column-major mode.
   (:<>) :: DenseMatrix a -> DenseMatrix a -> Op DenseMatrix a
-  -- vector and vector outer-product
+  -- | vector and vector outer-product
   (:##) :: DenseVector a -> DenseVector a -> Op DenseMatrix a
-  -- pairwise product of vector or matrix
+  -- | pairwise product of vector or matrix
   (:.*) :: c a -> c a -> Op c a
-  -- pairwise sum of vector or matrix
+  -- | pairwise sum of vector or matrix
   (:.+) :: c a -> c a -> Op c a
-  -- scale of vector or matrix
+  -- | scale of vector or matrix
   Scale :: a -> Op c a
-  -- apply a function
+  -- | apply a SIMD-enabled function
   Apply :: (SIMDPACK a -> SIMDPACK a) -> Op c a
-  -- zip with a function
+  -- | zip with a SIMD-enabled function
   ZipWith :: (SIMDPACK a -> SIMDPACK a -> SIMDPACK a) -> c a -> c a -> Op c a
-  -- scale the result of some op
-  -- especially used in convolution, where :#> is followed by scale.
+  -- | scale the result of some op
+  -- especially used in convolution, where :<> is followed by a scale.
   Scale' :: a -> Op c a -> Op c a
-  -- interpret an op to matrix as an op to matrixarray, where each row
-  -- becomes a matrix.
+  -- | interpret an op to matrix as an op to matrixarray, where each row
+  -- becomes a matrix. This Op is only used internally inside this module
   UnsafeM2MA :: Op DenseMatrix a -> Op DenseMatrixArray a
 
+-- | Perform an operation
 class AssignTo c a where
+  -- | store the result of a Op to the lhs
   (<<=) :: c a -> Op c a -> IO ()
+  -- | plus the result of a Op to the lhs and store
   (<<+) :: c a -> Op c a -> IO ()
 
 instance (Numeric a, V.Storable a, SIMDable a) => AssignTo DenseVector a where
@@ -271,18 +345,7 @@ instance (Numeric a, V.Storable a, SIMDable a) => AssignTo DenseMatrixArray a wh
   ma <<+ Scale' r (UnsafeM2MA op) = ma <<+ UnsafeM2MA (Scale' r op)
   _ <<+ _ = error "Unsupported Op [MatrixArray <<+]."
 
--- hadamard :: (V.Storable a, Num a)
---          => (a -> a -> a) -> V.IOVector a -> V.IOVector a -> V.IOVector a -> IO ()
--- hadamard op v x y = assert (V.length x == sz && V.length y == sz) $ go 0
---   where
---     sz = V.length v
---     go !i = if (i == sz)
---               then return ()
---               else do a <- V.unsafeRead x i
---                       b <- V.unsafeRead y i
---                       V.unsafeWrite v i (op a b)
---                       go (i+1)
-
+-- | sum up all elements in the 'DenseMatrix'
 sumElements :: (V.Storable a, Num a) => DenseMatrix a -> IO a
 sumElements (DenseMatrix r c v) = go v (r*c) 0
   where
@@ -290,8 +353,14 @@ sumElements (DenseMatrix r c v) = go v (r*c) 0
     go v !n !s = do a <- V.unsafeRead v 0
                     go (V.unsafeTail v) (n-1) (a+s)
 
+-- | 2D correlation
+-- Apply a vector of kernels to a dense-matrix with some zero-padding.
 corr2 :: (V.Storable a, Numeric a)
-      => Int -> BV.Vector (DenseMatrix a) -> DenseMatrix a -> (Op DenseMatrixArray a -> IO b) -> IO b
+      => Int                             -- ^ number of 0s padded around
+      -> BV.Vector (DenseMatrix a)       -- ^ vector of kernels
+      -> DenseMatrix a                   -- ^ matrix to be operated
+      -> (Op DenseMatrixArray a -> IO b) -- ^ how to perform the final operation
+      -> IO b
 corr2 p ks m fun = do
   let k0      = BV.head ks
       (kr,kc) = size k0
@@ -304,8 +373,14 @@ corr2 p ks m fun = do
   DenseMatrixArray n r c v <- denseMatrixArrayFromVector ks
   fun $ UnsafeM2MA $ wrk :<> DenseMatrix n (r*c) v
 
+-- | 2D convolution
+-- Apply a vector of kernels to a dense-matrix with some zero-padding.
 conv2 :: (V.Storable a, Numeric a)
-      => Int -> BV.Vector (DenseMatrix a) -> DenseMatrix a -> (Op DenseMatrixArray a -> IO b) -> IO b
+      => Int                             -- ^ number of 0s padded around
+      -> BV.Vector (DenseMatrix a)       -- ^ vector of kernels
+      -> DenseMatrix a                   -- ^ matrix to be operated
+      -> (Op DenseMatrixArray a -> IO b) -- ^ how to perform the final operation
+      -> IO b
 conv2 p ks m fun = do
   let k0      = BV.head ks
       (kr,kc) = size k0
@@ -347,10 +422,9 @@ fill wrk@(DenseMatrix _ _ vwrk) m u v kr kc = do
         copyV t s kc
         writeIORef refv (dropV kc t)
 
--- max pool, picking out the maximum element
--- in each stride x stride sub-matrices.
--- assuming that the original matrix row and column size are
--- both multiple of stride
+-- | max-pooling, picking out the maximum element in each stride x stride
+-- sub-matrices. Assuming that the original matrix row and column size are
+-- both multiple of stride.
 pool :: Int -> DenseMatrix Float -> IO (DenseVector Int, DenseMatrix Float)
 pool 1 mat = do
   let (r,c) = size mat
@@ -383,8 +457,7 @@ pool stride mat = do
       v <- readIORef mv
       return (p, v)
 
--- the reverse of max pool.
--- assuming idx and mat are of the same size
+-- | The reverse of max pool.
 unpool :: Int -> DenseVector Int -> DenseMatrix Float -> IO (DenseMatrix Float)
 unpool stride idx mat = do
   mat' <- newDenseMatrix r' c'
@@ -399,6 +472,9 @@ unpool stride idx mat = do
     (r,c) = size mat
     (r',c') = (r*stride, c*stride)
 
+-- | transpose a vector of 'DenseMatrixArray'
+-- The result is vector of vector of 'DenseMatrix', because the matrices are
+-- no longer placed consecutively in storage.
 transpose :: V.Storable a => BV.Vector (DenseMatrixArray a) -> IO (BV.Vector (BV.Vector (DenseMatrix a)))
 transpose vma = do
   let DenseMatrixArray n _ _ _  = BV.head vma

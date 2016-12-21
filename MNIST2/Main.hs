@@ -16,14 +16,15 @@ import System.IO.Unsafe
 import Parser
 
 main = do x <- runExceptT $ compile ByBLASHS (In2D 28 28 :++
-                                              Convolution 4 7 3 :++ MaxPooling 2 :++
+                                              Convolution 16 7 3 :++ MaxPooling 2 :++
+                                              Convolution 32 5 2 :++ MaxPooling 2 :++
                                               Reshape2DAs1D :++
                                               FullConnect 256 :++ FullConnect 64 :++
                                               FullConnect 10)
           case x of
             Left _ -> putStrLn "Error."
-            Right cnn -> -- dotrain cnn >>= dotest
-                         debug cnn
+            Right cnn -> dotrain cnn >>= dotest
+                         -- debug cnn
 
 debug :: (Component n, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
       => n -> IO ()
@@ -67,7 +68,7 @@ dotrain nn = do
         i <- readIORef cnt
         writeIORef cnt (i+1)
         putStrLn ("Iteration " ++ show i)
-  iterateM 15 nn ((dispAndInc >>) . online 0.002 dataset)
+  iterateM 8 nn ((dispAndInc >>) . online 0.001 dataset)
 
 dotest :: (Component n, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
        => n -> IO ()
@@ -114,9 +115,8 @@ preprocess (img,lbl) = do
   return (V.singleton $ DenseMatrix 28 28 i, DenseVector l)
 postprocess :: PLabel -> IO Int
 postprocess v = do
-  a <- toListV v
-  return $ fst $ maximumBy cmp $ zip [0..] a
-  where cmp a b = compare (snd a) (snd b)
+  a <- denseVectorToVector v
+  return $ V.maxIndex a
 
 prettyResult a = do
     v <- postprocess a
@@ -124,6 +124,6 @@ prettyResult a = do
   where
     showPretty x = displayS (renderPretty 0.4 500 x) ""
 
-instance Pretty (DenseVector R) where
-  pretty vec = let a = unsafePerformIO (toListV vec)
-               in encloseSep langle rangle comma $ map (text . printf "%.04f") a
+instance Pretty (DenseVector Float) where
+  pretty vec = let a = unsafePerformIO (denseVectorToVector vec)
+               in encloseSep langle rangle comma $ map (text . printf "%.04f") (V.toList a)

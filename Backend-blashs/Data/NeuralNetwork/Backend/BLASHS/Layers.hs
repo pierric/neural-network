@@ -1,5 +1,22 @@
+------------------------------------------------------------
+-- |
+-- Module      :  Data.NeuralNetwork.Backend.BLASHS.Utils
+-- Description :  A backend for neuralnetwork with blas-hs.
+-- Copyright   :  (c) 2016 Jiasen Wu
+-- License     :  BSD-style (see the file LICENSE)
+-- Maintainer  :  Jiasen Wu <jiasenwu@hotmail.com>
+-- Stability   :  stable
+-- Portability :  portable
+--
+--
+-- This module supplies a high level abstraction of the rather
+-- low-level blas-hs interfaces.
+------------------------------------------------------------
 {-# LANGUAGE BangPatterns, TypeFamilies, TypeOperators, FlexibleInstances, FlexibleContexts, GADTs #-}
-module Data.NeuralNetwork.Backend.BLASHS.Layers where
+module Data.NeuralNetwork.Backend.BLASHS.Layers(
+  SinglVec, MultiMat, F, C, A, P, T, S, RunLayer(..),
+  newFLayer, newCLayer
+) where
 
 import qualified Data.Vector as V
 import System.Random.MWC
@@ -15,12 +32,12 @@ import Data.NeuralNetwork.Backend.BLASHS.SIMD
 type R = Float
 type M = IO
 
--- We parameterise the activation layer T, where the parameter indicates how
+-- | We parameterise the activation layer T, where the parameter indicates how
 -- elements are contained:
 data SinglVec
 data MultiMat
 
--- Tags for each form of layer
+-- | Tags for each form of layer
 data F
 data C
 data A
@@ -28,6 +45,7 @@ data P
 data T c
 data S a b
 
+-- | basic components of neural network
 data RunLayer :: * -> * where
   -- Densely connected layer
   -- input:   vector of size m
@@ -94,11 +112,11 @@ instance Component (RunLayer A) where
   forwardT _ !inp = do
     let !b = V.length inp
         (!r,!c) = size (V.head inp)
-    o <- concatV $ V.map m2v inp
+    o <- denseVectorConcat $ V.map m2v inp
     return $ ReshapeTrace (b, r, c, o)
   output (ReshapeTrace (_,_,_,a)) = a
   backward a (ReshapeTrace (b,r,c,_)) !odelta _ = do
-    let !idelta = V.fromList $ map (v2m r c) $ splitV b (r*c) odelta
+    let !idelta = V.map (v2m r c) $ denseVectorSplit b (r*c) odelta
     return $ (a, idelta)
 
 instance Component (RunLayer C) where
