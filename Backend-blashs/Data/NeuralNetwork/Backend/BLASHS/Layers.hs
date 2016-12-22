@@ -37,12 +37,17 @@ type M = IO
 data SinglVec
 data MultiMat
 
--- | Tags for each form of layer
+-- | tag for the full-connect component
 data F
+-- | tag for the convolution component
 data C
+-- | tag for the component that converts 2D as 1D
 data A
+-- | tag for the max-pooling component
 data P
+-- | tag for the activation component
 data T c
+-- | tag for the stacking component
 data S a b
 
 -- | basic components of neural network

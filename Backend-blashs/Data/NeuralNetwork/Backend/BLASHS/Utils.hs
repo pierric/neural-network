@@ -130,6 +130,7 @@ v2ma n r c (DenseVector v) = assert (V.length v == n*r*c) $ DenseMatrixArray n r
 ma2v (DenseMatrixArray n r c v) = DenseVector v
 
 -- | convert a 'DenseVector' to a vector of elements
+denseVectorToVector :: V.Storable a => DenseVector a -> IO (BV.Vector a)
 denseVectorToVector (DenseVector vs) = SV.unsafeFreeze vs >>= return . BV.convert
 
 -- | concatenate a vector of 'DenseVector's.
@@ -221,7 +222,7 @@ data Op :: (* -> *) -> * -> * where
   (:<#) :: DenseVector a -> DenseMatrix a -> Op DenseVector a
   -- | matrix and vector (as-column) product
   (:#>) :: DenseMatrix a -> DenseVector a -> Op DenseVector a
-  -- | matrix and matrix product
+  -- | matrix and matrix product.
   -- This is a specially customized matrix matrix product, for the sake of quick
   -- convolution. The 1st matrix is transposed before multiplication, and the
   -- result matrix is stored in column-major mode.
@@ -238,8 +239,9 @@ data Op :: (* -> *) -> * -> * where
   Apply :: (SIMDPACK a -> SIMDPACK a) -> Op c a
   -- | zip with a SIMD-enabled function
   ZipWith :: (SIMDPACK a -> SIMDPACK a -> SIMDPACK a) -> c a -> c a -> Op c a
-  -- | scale the result of some op
-  -- especially used in convolution, where :<> is followed by a scale.
+  -- | scale the result of some op.
+  -- It is possible to combine scale and many other operations in a single
+  -- BLAS call.
   Scale' :: a -> Op c a -> Op c a
   -- | interpret an op to matrix as an op to matrixarray, where each row
   -- becomes a matrix. This Op is only used internally inside this module
@@ -249,7 +251,7 @@ data Op :: (* -> *) -> * -> * where
 class AssignTo c a where
   -- | store the result of a Op to the lhs
   (<<=) :: c a -> Op c a -> IO ()
-  -- | plus the result of a Op to the lhs and store
+  -- | add the result of a Op to the lhs and store
   (<<+) :: c a -> Op c a -> IO ()
 
 instance (Numeric a, V.Storable a, SIMDable a) => AssignTo DenseVector a where
@@ -353,7 +355,7 @@ sumElements (DenseMatrix r c v) = go v (r*c) 0
     go v !n !s = do a <- V.unsafeRead v 0
                     go (V.unsafeTail v) (n-1) (a+s)
 
--- | 2D correlation
+-- | 2D correlation.
 -- Apply a vector of kernels to a dense-matrix with some zero-padding.
 corr2 :: (V.Storable a, Numeric a)
       => Int                             -- ^ number of 0s padded around
@@ -373,7 +375,7 @@ corr2 p ks m fun = do
   DenseMatrixArray n r c v <- denseMatrixArrayFromVector ks
   fun $ UnsafeM2MA $ wrk :<> DenseMatrix n (r*c) v
 
--- | 2D convolution
+-- | 2D convolution.
 -- Apply a vector of kernels to a dense-matrix with some zero-padding.
 conv2 :: (V.Storable a, Numeric a)
       => Int                             -- ^ number of 0s padded around
@@ -457,7 +459,7 @@ pool stride mat = do
       v <- readIORef mv
       return (p, v)
 
--- | The reverse of max pool.
+-- | The reverse of max-pooling.
 unpool :: Int -> DenseVector Int -> DenseMatrix Float -> IO (DenseMatrix Float)
 unpool stride idx mat = do
   mat' <- newDenseMatrix r' c'

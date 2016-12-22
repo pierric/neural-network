@@ -1,3 +1,17 @@
+------------------------------------------------------------
+-- |
+-- Module      :  Data.NeuralNetwork
+-- Description :  Neural network in abstract
+-- Copyright   :  (c) 2016 Jiasen Wu
+-- License     :  BSD-style (see the file LICENSE)
+-- Maintainer  :  Jiasen Wu <jiasenwu@hotmail.com>
+-- Stability   :  stable
+-- Portability :  portable
+--
+--
+-- This module defines an abstract interface for neural network
+-- and a protocol for its backends to follow.
+------------------------------------------------------------
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -24,26 +38,20 @@ import Data.Constraint
 class Component a where
   -- | execution environment
   type Run a :: * -> *
-  -- | the input and in-error are typed by 'Inp a'
+  -- | the type of input and in-error
   type Inp a
-  -- | the output and out-error are typed by 'Out a'
+  -- | the type of output and out-error
   type Out a
-  -- | the trace of a forward propagation.
+  -- | the trace of a forward propagation
   data Trace a
   -- | Forward propagation
-  -- input: layer, input value
-  -- output: a trace
   forwardT :: a -> Inp a -> Run a (Trace a)
   -- | Forward propagation
-  -- input: layer, input value
-  -- output: the output value.
   forward  :: Applicative (Run a) => a -> Inp a -> Run a (Out a)
   forward a = (output <$>) . forwardT a
   -- | extract the output value from the trace
   output   :: Trace a -> Out a
   -- | Backward propagation
-  -- input:  old layer, a trace, out-error, learning rate
-  -- output: new layer, in-error
   backward :: a -> Trace a -> Out a -> Float -> Run a (a, Inp a)
 
 -- | By giving a way to measure the error, 'learn' can update the
@@ -70,23 +78,35 @@ cost' :: (Num a, Ord a) => a -> a -> a
 cost' a y | y == 1 && a >= y = 0
           | otherwise        = a - y
 
--- | Specification of neural network
-data SpecIn1D          = In1D Int
-data SpecIn2D          = In2D Int Int
-data SpecFullConnect   = FullConnect Int
-data SpecConvolution   = Convolution Int Int Int
+-- | Specification: 1D input
+data SpecIn1D          = In1D Int     -- ^ dimension of input
+
+-- | Specification: 2D input
+data SpecIn2D          = In2D Int Int -- ^ dimension of input
+
+-- | Specification: full connection layer
+data SpecFullConnect   = FullConnect Int  -- ^ number of neurals
+
+-- | Specification: convolution layer
+data SpecConvolution   = Convolution Int Int Int -- ^ number of output channels, size of kernel, size of padding
+
+-- | Specification: max pooling layer
 data SpecMaxPooling    = MaxPooling  Int
+
+-- | Specification: reshaping layer
 data SpecReshape2DAs1D = Reshape2DAs1D
+
+-- | Specification: stacking layer
 infixr 0 :++
 data a :++ b = a :++ b
 
--- | Abstraction of backend to carry out the specification.
+-- | Abstraction of backend to carry out the specification
 class Backend b s where
   -- | environment to 'compile' the specification
   type Env b :: * -> *
-  -- | result type of 'compile'.
+  -- | result type of 'compile'
   type ConvertFromSpec s :: *
-  -- | necessary constraints of the resulting type.
+  -- | necessary constraints of the resulting type
   witness :: b -> s -> Dict ( Monad (Env b)
                             , Monad (Run (ConvertFromSpec s))
                             , Component (ConvertFromSpec s)

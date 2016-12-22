@@ -1,5 +1,22 @@
+------------------------------------------------------------
+-- |
+-- Module      :  Data.NeuralNetwork.Backend.BLASHS.SIMD
+-- Description :  SIMD based calculations
+-- Copyright   :  (c) 2016 Jiasen Wu
+-- License     :  BSD-style (see the file LICENSE)
+-- Maintainer  :  Jiasen Wu <jiasenwu@hotmail.com>
+-- Stability   :  stable
+-- Portability :  portable
+--
+--
+-- This module supplies a collection of calculations that
+-- could be implemented on top of SIMD.
+------------------------------------------------------------
 {-# LANGUAGE TypeFamilies, FlexibleContexts #-}
-module Data.NeuralNetwork.Backend.BLASHS.SIMD where
+module Data.NeuralNetwork.Backend.BLASHS.SIMD (
+  SIMDable(..),
+  cost', relu, relu'
+)  where
 
 import Data.Vector.Storable.Mutable as MV
 import Control.Exception
@@ -43,9 +60,11 @@ instance SIMDable Float where
         unsafeWrite z 0 (unF $ op (F a))
         go (n-1) (unsafeTail z) (unsafeTail x)
 
+-- | SIMD based, RELU and derivative of RELU
 relu, relu' :: SIMDPACK Float -> SIMDPACK Float
 relu  (F a) = F $ B.relu  a
 relu' (F a) = F $ B.relu' a
 
+-- | SIMD based, derivative of error measurement
 cost' :: SIMDPACK Float -> SIMDPACK Float -> SIMDPACK Float
 cost' (F a) (F b) = F (B.cost' a b)

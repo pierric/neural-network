@@ -1,7 +1,26 @@
+------------------------------------------------------------
+-- |
+-- Module      :  Data.NeuralNetwork.Backend.BLASHS.SIMD
+-- Description :  SIMD based calculations
+-- Copyright   :  (c) 2016 Jiasen Wu
+-- License     :  BSD-style (see the file LICENSE)
+-- Maintainer  :  Jiasen Wu <jiasenwu@hotmail.com>
+-- Stability   :  stable
+-- Portability :  portable
+--
+--
+-- This module supplies a collection of calculations that
+-- could be implemented on top of SIMD.
+------------------------------------------------------------
 {-# LANGUAGE TypeFamilies, FlexibleContexts, FlexibleInstances #-}
 {-# LANGUAGE UnboxedTuples, MagicHash #-}
 {-# LANGUAGE GHCForeignImportPrim, UnliftedFFITypes #-}
-module Data.NeuralNetwork.Backend.BLASHS.SIMD where
+module Data.NeuralNetwork.Backend.BLASHS.SIMD (
+  compareVector,
+  selectVector,
+  SIMDable(..),
+  cost', relu, relu'
+) where
 
 import Data.Vector.Storable.Mutable as MV
 import qualified Data.Vector.Storable as SV
@@ -102,6 +121,7 @@ instance SIMDable Float where
           when (n > 2) $ do
             unsafeWrite z 2 vz2
 
+-- | SIMD based, RELU and derivative of RELU
 relu, relu' :: SIMDPACK Float -> SIMDPACK Float
 relu  x = let v0 = broadcastVector 0
           in selectVector (compareVector GE x v0) x v0
@@ -109,6 +129,7 @@ relu' x = let v0 = broadcastVector 0
               v1 = broadcastVector 1
           in selectVector (compareVector GE v0 x) v0 v1
 
+-- | SIMD based, derivative of error measurement
 cost' :: SIMDPACK Float -> SIMDPACK Float -> SIMDPACK Float
 cost' a y = selectVector (compareVector GE a y)
               (selectVector (compareVector GE y (broadcastVector 1))
