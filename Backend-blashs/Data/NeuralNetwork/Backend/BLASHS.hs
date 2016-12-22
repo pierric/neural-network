@@ -5,7 +5,7 @@
 -- Copyright   :  (c) 2016 Jiasen Wu
 -- License     :  BSD-style (see the file LICENSE)
 -- Maintainer  :  Jiasen Wu <jiasenwu@hotmail.com>
--- Stability   :  stable
+-- Stability   :  experimental
 -- Portability :  portable
 --
 --

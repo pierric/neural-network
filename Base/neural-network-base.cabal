@@ -3,6 +3,9 @@ version:             0.1.0.0
 license-file:        LICENSE
 author:              jason wu
 maintainer:          jiasenwu@hotmail.com
+homepage:            https://github.com/pierric/neural-network
+bug-reports:         https://github.com/pierric/neural-network/issues
+Stability:           Experimental
 build-type:          Simple
 cabal-version:       >=1.10
 
