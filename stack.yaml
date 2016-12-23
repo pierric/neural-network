@@ -37,11 +37,12 @@ resolver: lts-7.10
 # will not be run. This is useful for tweaking upstream packages.
 packages:
 - 'Base'
-- 'Backend-hmatrix'
-#- 'Backend-blashs'
-- 'MNIST'
-- '../hmatrix/packages/base/'
-- '../hmatrix/packages/gsl/'
+- 'Backend-blashs'
+- 'MNIST2'
+# - 'Backend-hmatrix'
+# - 'MNIST'
+# - '../hmatrix/packages/base/'
+# - '../hmatrix/packages/gsl/'
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)
 extra-deps:
@@ -51,8 +52,8 @@ extra-deps:
 flags:
   blas-hs:
     openblas: true
-  hmatrix:
-    openblas: true
+# hmatrix:
+#   openblas: true
 
 # Extra package databases containing global packages
 extra-package-dbs: []
@@ -70,11 +71,11 @@ arch: x86_64
 #
 # Extra directories used by stack for building
 extra-include-dirs:
-- D:\Dev\NN\OpenBLAS-v0.2.15-Win64-int32\include
+- 
 extra-lib-dirs:
-- D:\Dev\NN\OpenBLAS-v0.2.15-Win64-int32\lib
+- 
 #
 # Allow a newer minor version of GHC than the snapshot specifies
 # compiler-check: newer-minor
 ghc-options:
-    "*": -O3 -rtsopts -threaded
+    "*": -O3 -rtsopts
