@@ -12,19 +12,30 @@ import Control.Monad
 import Control.Monad.Except
 import System.Environment
 import Text.PrettyPrint.Free hiding (flatten)
+import System.IO (hFlush, stdout)
 import System.IO.Unsafe
 import Parser
 
-main = do x <- runExceptT $ compile ByBLASHS (In2D 28 28 :++
-                                              Convolution 16 7 3 :++ MaxPooling 2 :++
-                                              Convolution 32 5 2 :++ MaxPooling 2 :++
+main = do x <- runExceptT $ compile ByBLASHS ((In2D 28 28) :++
+                                              Convolution 12 7 3 :++ MaxPooling 2 :++
+                                              Convolution 24 5 2 :++ MaxPooling 2 :++
                                               Reshape2DAs1D :++
-                                              FullConnect 256 :++ FullConnect 64 :++
+                                              FullConnect 512 :++ FullConnect 32 :++
                                               FullConnect 10)
           case x of
             Left _ -> putStrLn "Error."
-            Right cnn -> dotrain cnn >>= dotest
-                         -- debug cnn
+            Right cnn -> do
+              loop cnn 5
+              -- debug cnn
+  where
+    loop cnn cnt = do
+      cnn <- dotrain cnn cnt
+      dotest cnn
+      putStr "Continue? (number):"
+      hFlush stdout
+      str <- getLine
+      let next = (reads :: ReadS Int) str
+      when (not $ null next) (loop cnn (fst $ head next))
 
 debug :: (Component n, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
       => n -> IO ()
@@ -57,8 +68,8 @@ debug nn = do
         prettyResult ev >>= putStrLn . ("*" ++ )
 
 dotrain :: (Component n, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
-        => n -> IO n
-dotrain nn = do
+        => n -> Int -> IO n
+dotrain nn mcnt = do
   putStrLn "Load training data."
   dataset <- trainingData >>= mapM preprocess . uncurry zip
   putStrLn "Load test data."
@@ -68,7 +79,7 @@ dotrain nn = do
         i <- readIORef cnt
         writeIORef cnt (i+1)
         putStrLn ("Iteration " ++ show i)
-  iterateM 8 nn ((dispAndInc >>) . online 0.001 dataset)
+  iterateM mcnt nn ((dispAndInc >>) . online 0.001 dataset)
 
 dotest :: (Component n, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
        => n -> IO ()
