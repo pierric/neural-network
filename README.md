@@ -34,9 +34,11 @@ and matrix is devised for better storage utilization.
     neural-network-blashs:
       vec128: true
 ```
-  - A known bug on windows. *vec128* implies compiler option **-fllvm** for ghc. However due to a known bug of binutils on mingw-w64, this option leads to a segment fault 
-    - mingw-w64-x86_64-binutils < 2.27-2
-    - ghc <= 8.0.1 (because it is bundled with old binutils)
-    - stack resolver <= lts-7.14 (because it imples ghc <= 8.0.1)
-    - See bug report here https://ghc.haskell.org/trac/ghc/ticket/8974
-- The *vec256* and *vec512* cause segment-fault for the moment.
+- The flags *vec256* and *vec512* cause segment-fault for the moment.
+
+- A known bug on windows. *vec128* implies compiler option **-fllvm** for ghc. However due to a known bug of binutils on mingw-w64, this option leads to a segment fault 
+  - mingw-w64-x86_64-binutils < 2.27-2
+  - ghc <= 8.0.1 (because it is bundled with old binutils)
+  - stack resolver <= lts-7.14 (because it imples ghc <= 8.0.1)
+  - See bug report here https://ghc.haskell.org/trac/ghc/ticket/8974
+
