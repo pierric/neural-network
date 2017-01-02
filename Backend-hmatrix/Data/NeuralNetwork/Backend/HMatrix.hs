@@ -8,7 +8,6 @@ module Data.NeuralNetwork.Backend.HMatrix (
 ) where
 
 import Data.NeuralNetwork
-import Data.NeuralNetwork.Backend.HMatrix.Utils
 import Data.NeuralNetwork.Backend.HMatrix.Layers
 import Numeric.LinearAlgebra (Vector, Matrix)
 import Control.Monad.Except

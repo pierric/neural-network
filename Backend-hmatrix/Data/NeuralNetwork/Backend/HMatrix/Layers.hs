@@ -1,4 +1,5 @@
 {-# LANGUAGE BangPatterns, TypeFamilies, TypeOperators, FlexibleInstances, FlexibleContexts, GADTs #-}
+{-# LANGUAGE MultiParamTypeClasses, UndecidableInstances #-}
 module Data.NeuralNetwork.Backend.HMatrix.Layers where
 
 import Numeric.LinearAlgebra hiding (R, C)
@@ -15,7 +16,6 @@ import Data.STRef
 import Data.Functor.Identity
 import Control.DeepSeq
 import Data.NeuralNetwork
-import Data.NeuralNetwork.Backend.HMatrix.Utils
 
 type R = Float
 
@@ -103,7 +103,6 @@ instance Component (RunLayer F) where
             --          dat2 = flatten (tr' m)
             --      in matrixFromVector ColumnMajor r c $ SV.force $ dat1 `add` dat2
             !b'= b `add` d
-            -- !b'= SV.force $ b `add` d
         in return $ (Full w' b', idelta)
 
 instance Component (RunLayer C) where
@@ -113,9 +112,9 @@ instance Component (RunLayer C) where
     -- trace is (input, convoluted output)
     newtype Trace (RunLayer C) = CTrace (Inp (RunLayer C), V.Vector (Matrix R))
     forwardT (Conv fs bs p) !inp =
-        let !ov = parallel $ V.zipWith feature
-                               (tr fs) -- feature matrix indexed majorly by each output
-                               bs      -- biases by each output
+        let !ov = V.zipWith feature
+                            (tr fs) -- feature matrix indexed majorly by each output
+                            bs      -- biases by each output
         in return $ CTrace (inp,ov)
       where
         !osize = let (x,y) = size (V.head inp)
@@ -133,7 +132,7 @@ instance Component (RunLayer C) where
       let Conv fs bs p = l
           -- update to the feature matrix
           m :: V.Vector (V.Vector (Matrix R))
-          !m = parallel $ V.zipWith (\flts chn ->
+          !m = V.zipWith (\flts chn ->
                             -- chn:  a single input channel
                             -- flts: all features used for chn
                             V.zipWith (\f d ->
@@ -175,7 +174,7 @@ instance Component (RunLayer M) where
   newtype Trace (RunLayer M) = PTrace (V.Vector (IndexOf Matrix, Vector Int, Matrix R))
   -- forward is to divide the input matrix in stride x stride sub matrices,
   -- and then find the max element in each sub matrices.
-  forwardT (MaxP stride) !inp = return $ PTrace $ parallel $ V.map mk inp
+  forwardT (MaxP stride) !inp = return $ PTrace $ V.map mk inp
     where
       mk inp = let (!i,!v) = pool stride inp in (size v, i, v)
   output (PTrace a) = V.map (\(_,_,!o) ->o) a
@@ -205,7 +204,7 @@ instance (Component (RunLayer a),
         (a', !idelta ) <- backward a tra odelta' rate
         return (Stack a' b', idelta)
 
-instance (Container c R) => Component (RunLayer (T (MultiC :. c))) where
+instance (Container c R, Pairwise c R) => Component (RunLayer (T (MultiC :. c))) where
     type Run (RunLayer (T (MultiC :. c))) = Identity
     type Inp (RunLayer (T (MultiC :. c))) = V.Vector (c R)
     type Out (RunLayer (T (MultiC :. c))) = V.Vector (c R)
@@ -217,7 +216,7 @@ instance (Container c R) => Component (RunLayer (T (MultiC :. c))) where
       idelta <- V.zipWithM (\t d -> snd <$> backward (Activation ac) t d r) ts odelta
       return (a, idelta)
 
-instance (Container c R) => Component (RunLayer (T (SinglC :. c))) where
+instance (Container c R, Pairwise c R) => Component (RunLayer (T (SinglC :. c))) where
     type Run (RunLayer (T (SinglC :. c))) = Identity
     type Inp (RunLayer (T (SinglC :. c))) = c R
     type Out (RunLayer (T (SinglC :. c))) = c R
@@ -261,16 +260,15 @@ buildMatrix g order (nr, nc) = do
   return $ matrixFromVector order nr nc vals
 
 layerCorr2 :: Int -> Matrix R -> Matrix R -> Matrix R
-layerCorr2 p k m = c_corr2d_s k padded
+layerCorr2 p k m = corr2 k padded
   where
     padded = zeroPadded p m
     (w,_)  = size k
 
 layerConv2 :: Int -> Matrix R -> Matrix R -> Matrix R
-layerConv2 p k m = c_conv2d_s k padded
+layerConv2 p k m = corr2 (fliprl . flipud $ k) padded
   where
     padded = zeroPadded p m
-    (w,_)  = size k
 
 -- max pool, picking out the maximum element
 -- in each stride x stride sub-matrices.
@@ -343,3 +341,13 @@ newMatrix' v r c = do
   vec <- SVM.replicate (r*c) v
   vec <- SV.unsafeFreeze vec
   unsafeThawMatrix $ reshape c vec
+
+-- The hmatrix does has a SIMD enabled pairwise product named 'mul' in the
+-- 'Container' class, but unfortunately it is not exported at all.
+-- We define a slow hadamard product here.
+class Container c e => Pairwise c e where
+  hadamard :: c e -> c e -> c e
+instance Pairwise Vector R where
+  hadamard = zipVectorWith (*)
+instance Pairwise Matrix R where
+  hadamard a b = reshape (cols a) $ hadamard (flatten a) (flatten b)
