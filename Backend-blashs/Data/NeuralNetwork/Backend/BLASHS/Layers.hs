@@ -14,7 +14,7 @@
 ------------------------------------------------------------
 {-# LANGUAGE BangPatterns, TypeFamilies, TypeOperators, FlexibleInstances, FlexibleContexts, GADTs #-}
 module Data.NeuralNetwork.Backend.BLASHS.Layers(
-  SinglVec, MultiMat, F, C, A, P, T, S, RunLayer(..),
+  SinglVec, MultiMat, F, C, A, P, T, RunLayer(..),
   newFLayer, newCLayer
 ) where
 
@@ -47,8 +47,6 @@ data A
 data P
 -- | tag for the activation component
 data T c
--- | tag for the stacking component
-data S a b
 
 -- | basic components of neural network
 data RunLayer :: * -> * where
@@ -83,9 +81,6 @@ data RunLayer :: * -> * where
   -- | Activator
   -- the input can be either a 1D vector, 2D matrix, or channels of either.
   Activation :: (SIMDPACK R -> SIMDPACK R, SIMDPACK R -> SIMDPACK R) -> RunLayer (T c)
-  -- | stacking two components a and b
-  -- the output of a should matches the input of b
-  Stack :: !(RunLayer a) -> !(RunLayer b) -> RunLayer (S a b)
 
 instance Component (RunLayer F) where
     type Run (RunLayer F) = IO
@@ -175,25 +170,6 @@ instance Component (RunLayer C) where
                 ) fss iv
     let !ideltaV = denseMatrixArrayToVector idelta
     return $ (Conv fss nb pd, ideltaV)
-instance (Component (RunLayer a),
-          Component (RunLayer b),
-          Run (RunLayer a) ~ IO,
-          Run (RunLayer b) ~ IO,
-          Out (RunLayer a) ~ Inp (RunLayer b)
-         ) => Component (RunLayer (S a b)) where
-    type Run (RunLayer (S a b)) = IO
-    type Inp (RunLayer (S a b)) = Inp (RunLayer a)
-    type Out (RunLayer (S a b)) = Out (RunLayer b)
-    newtype Trace (RunLayer (S a b)) = TTrace (Trace (RunLayer b), Trace (RunLayer a))
-    forwardT (Stack a b) !i = do
-        !tra <- forwardT a i
-        !trb <- forwardT b (output tra)
-        return $ TTrace (trb, tra)
-    output (TTrace !a) = output (fst a)
-    backward (Stack a b) (TTrace (!trb,!tra)) !odeltb rate = do
-        (b', !odelta) <- backward b trb odeltb rate
-        (a', !idelta) <- backward a tra odelta rate
-        return (Stack a' b', idelta)
 
 instance Component (RunLayer (T SinglVec)) where
     type Run (RunLayer (T SinglVec)) = IO

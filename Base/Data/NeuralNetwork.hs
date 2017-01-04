@@ -105,14 +105,14 @@ class Backend b s where
   -- | environment to 'compile' the specification
   type Env b :: * -> *
   -- | result type of 'compile'
-  type ConvertFromSpec s :: *
+  type ConvertFromSpec b s :: *
   -- | necessary constraints of the resulting type
   witness :: b -> s -> Dict ( Monad (Env b)
-                            , Monad (Run (ConvertFromSpec s))
-                            , Component (ConvertFromSpec s)
-                            , RunInEnv (Run (ConvertFromSpec s)) (Env b))
+                            , Monad (Run (ConvertFromSpec b s))
+                            , Component (ConvertFromSpec b s)
+                            , RunInEnv (Run (ConvertFromSpec b s)) (Env b))
   -- | compile the specification to runnable component.
-  compile :: b -> s -> Env b (ConvertFromSpec s)
+  compile :: b -> s -> Env b (ConvertFromSpec b s)
 
 -- | Lifting from one monad to another.
 -- It is not necessary that the 'Env' and 'Run' maps to the

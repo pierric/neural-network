@@ -16,6 +16,7 @@
 {-# LANGUAGE MultiParamTypeClasses, FlexibleContexts, FlexibleInstances #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
 module Data.NeuralNetwork.Backend.BLASHS (
   -- module Data.NeuralNetwork.Backend.BLASHS.Layers,
   module Data.NeuralNetwork.Backend.BLASHS.Utils,
@@ -25,10 +26,12 @@ module Data.NeuralNetwork.Backend.BLASHS (
 ) where
 
 import Data.NeuralNetwork hiding (relu, relu', cost')
+import Data.NeuralNetwork.Stack
 import Data.NeuralNetwork.Backend.BLASHS.Layers
 import Data.NeuralNetwork.Backend.BLASHS.Utils
 import Data.NeuralNetwork.Backend.BLASHS.SIMD
 import Control.Monad.Except
+import Control.Monad.State
 import Data.Constraint (Dict(..))
 
 -- | Compilation of the specification of a neural network is carried out in
@@ -41,11 +44,11 @@ data ByBLASHS = ByBLASHS
 
 -- | Neural network specified to start with 1D / 2D input
 instance (HeadSize z, TranslateBody s,
-          Component (RunLayer (SpecToTag s)),
-          Run (RunLayer (SpecToTag s)) ~ IO)
+          Component (SpecToCom s),
+          RunInEnv (Run (SpecToCom s)) Err)
        => Backend ByBLASHS (z :++ s) where
   type Env ByBLASHS = Err
-  type ConvertFromSpec (z :++ s) = RunLayer (SpecToTag s)
+  type ConvertFromSpec ByBLASHS (z :++ s) = SpecToCom s
   compile _ (a :++ l)= trans (hsize a) l
   witness _ _ = Dict
 
@@ -76,42 +79,43 @@ instance BodySize SpecConvolution where
 instance BodySize SpecMaxPooling where
   bsize (D2 k m n) (MaxPooling s) = D2 k (m `div` s) (n `div` s)
 
--- translate the body of specification
-class TranslateBody s where
-  type SpecToTag s
-  trans :: LayerSize -> s -> Err (RunLayer (SpecToTag s))
-
-instance TranslateBody SpecFullConnect where
+type family SpecToCom s where
   -- 'SpecFullConnect' is translated to a two-layer component
   -- a full-connect, followed by a relu activation (1D, single channel)
-  type SpecToTag SpecFullConnect = S F (T SinglVec)
+  SpecToCom SpecFullConnect = Stack (RunLayer F) (RunLayer (T SinglVec))
+  -- 'SpecConvolution' is translated to a two-layer component
+  -- a convolution, following by a relu activation (2D, multiple channels)
+  SpecToCom SpecConvolution = Stack (RunLayer C) (RunLayer (T MultiMat))
+  -- 'MaxPooling' is translated to a max-pooling component.
+  SpecToCom SpecMaxPooling = RunLayer P
+  -- 'SpecReshape2DAs1D' is translated to a reshaping component.
+  SpecToCom SpecReshape2DAs1D = RunLayer A
+  -- ':++' is translated to the stacking component.
+  SpecToCom (a :++ b) = Stack (SpecToCom a) (SpecToCom b)
+
+-- translate the body of specification
+class TranslateBody s where
+  trans :: LayerSize -> s -> Err (SpecToCom s)
+
+instance TranslateBody SpecFullConnect where
   trans (D1 s) (FullConnect n) = do u <- lift $ newFLayer s n
                                     return $ Stack u (Activation (relu, relu'))
   trans _ _ = throwError ErrMismatch
 
 instance TranslateBody SpecConvolution where
-  -- 'SpecConvolution' is translated to a two-layer component
-  -- a convolution, following by a relu activation (2D, multiple channels)
-  type SpecToTag SpecConvolution = S C (T MultiMat)
   trans (D2 k s t) (Convolution n f p) = do u <- lift $ newCLayer k n f p
                                             return $ Stack u (Activation (relu, relu'))
   trans _ _ = throwError ErrMismatch
 
 instance TranslateBody SpecMaxPooling where
-  -- 'MaxPooling' is translated to a max-pooling component.
-  type SpecToTag SpecMaxPooling = P
   trans (D2 _ _ _) (MaxPooling n) = return (MaxP n)
   trans (D1 _)     _              = throwError ErrMismatch
 
 instance TranslateBody SpecReshape2DAs1D where
-  -- 'SpecReshape2DAs1D' is translated to a reshaping component.
-  type SpecToTag SpecReshape2DAs1D = A
   trans (D2 _ _ _) _ = return As1D
   trans (D1 _)     _ = throwError ErrMismatch
 
 instance (TranslateBody a, TranslateBody c, BodySize a) => TranslateBody (a :++ c) where
-  -- ':++' is translated to the stacking component.
-  type SpecToTag (a :++ b) = S (SpecToTag a) (SpecToTag b)
   trans s (a :++ c) = do u <- trans s a
                          v <- trans (bsize s a) c
                          return $ Stack u v
