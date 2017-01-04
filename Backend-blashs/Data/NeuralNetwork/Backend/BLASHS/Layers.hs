@@ -14,7 +14,8 @@
 ------------------------------------------------------------
 {-# LANGUAGE BangPatterns, TypeFamilies, TypeOperators, FlexibleInstances, FlexibleContexts, GADTs #-}
 module Data.NeuralNetwork.Backend.BLASHS.Layers(
-  SinglVec, MultiMat, F, C, A, P, T, RunLayer(..),
+  SinglVec, MultiMat, F, C, P, T, RunLayer(..),
+  Reshape2DAs1D, as1D,
   newFLayer, newCLayer
 ) where
 
@@ -26,6 +27,7 @@ import Control.Monad (liftM2, forM_, when)
 import GHC.Float
 import Data.STRef
 import Data.NeuralNetwork
+import Data.NeuralNetwork.Adapter
 import Data.NeuralNetwork.Backend.BLASHS.Utils
 import Data.NeuralNetwork.Backend.BLASHS.SIMD
 
@@ -41,8 +43,6 @@ data MultiMat
 data F
 -- | tag for the convolution component
 data C
--- | tag for the component that converts 2D as 1D
-data A
 -- | tag for the max-pooling component
 data P
 -- | tag for the activation component
@@ -118,6 +118,18 @@ instance Component (RunLayer A) where
   backward a (ReshapeTrace (b,r,c,_)) !odelta _ = do
     let !idelta = V.map (v2m r c) $ denseVectorSplit b (r*c) odelta
     return $ (a, idelta)
+
+type Reshape2DAs1D = Adapter IO (V.Vector (DenseMatrix R)) (DenseVector R) (Int, Int, Int)
+as1D :: Reshape2DAs1D
+as1D = Adapter to back
+  where
+    to inp = do
+      let !b = V.length inp
+          (!r,!c) = size (V.head inp)
+      o <- denseVectorConcat $ V.map m2v inp
+      return ((b,r,c),o)
+    back (b,r,c) odelta =
+      return $! V.map (v2m r c) $ denseVectorSplit b (r*c) odelta
 
 instance Component (RunLayer C) where
   type Run (RunLayer C) = IO

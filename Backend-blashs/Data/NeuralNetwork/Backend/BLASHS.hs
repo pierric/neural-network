@@ -89,7 +89,7 @@ type family SpecToCom s where
   -- 'MaxPooling' is translated to a max-pooling component.
   SpecToCom SpecMaxPooling = RunLayer P
   -- 'SpecReshape2DAs1D' is translated to a reshaping component.
-  SpecToCom SpecReshape2DAs1D = RunLayer A
+  SpecToCom SpecReshape2DAs1D = Reshape2DAs1D
   -- ':++' is translated to the stacking component.
   SpecToCom (a :++ b) = Stack (SpecToCom a) (SpecToCom b)
 
@@ -112,7 +112,7 @@ instance TranslateBody SpecMaxPooling where
   trans (D1 _)     _              = throwError ErrMismatch
 
 instance TranslateBody SpecReshape2DAs1D where
-  trans (D2 _ _ _) _ = return As1D
+  trans (D2 _ _ _) _ = return as1D
   trans (D1 _)     _ = throwError ErrMismatch
 
 instance (TranslateBody a, TranslateBody c, BodySize a) => TranslateBody (a :++ c) where
