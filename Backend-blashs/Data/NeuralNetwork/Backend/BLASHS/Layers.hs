@@ -65,12 +65,6 @@ data RunLayer :: * -> * where
   -- padding:  number of 0s padded at each side of channel
   -- biases:   bias for each output, # of biases: n
   Conv  :: !(V.Vector (DenseMatrixArray R)) -> !(V.Vector R) -> Int -> RunLayer C
-  -- | Reshape from channels of matrix to a single vector
-  -- input:  m channels of 2D matrices
-  --         assuming that all matrices are of the same size a x b
-  -- output: 1D vector of the concatenation of all input channels
-  --         its size: m x a x b
-  As1D  :: RunLayer A
   -- | max pooling layer
   -- input:  channels of 2D floats, of the same size (a x b), # of input channels:  m
   --         assuming that a and b are both multiple of stride
@@ -102,34 +96,6 @@ instance Component (RunLayer F) where
         w <<+ iv :## odelta
         b <<= b  :.+ odelta
         return (Full w b, idelta)
-
-instance Component (RunLayer A) where
-  type Run (RunLayer A) = IO
-  type Inp (RunLayer A) = V.Vector (DenseMatrix R)
-  type Out (RunLayer A) = DenseVector R
-  -- trace keeps information of (m, a, b, output)
-  newtype Trace (RunLayer A) = ReshapeTrace (Int, Int, Int, DenseVector R)
-  forwardT _ !inp = do
-    let !b = V.length inp
-        (!r,!c) = size (V.head inp)
-    o <- denseVectorConcat $ V.map m2v inp
-    return $ ReshapeTrace (b, r, c, o)
-  output (ReshapeTrace (_,_,_,a)) = a
-  backward a (ReshapeTrace (b,r,c,_)) !odelta _ = do
-    let !idelta = V.map (v2m r c) $ denseVectorSplit b (r*c) odelta
-    return $ (a, idelta)
-
-type Reshape2DAs1D = Adapter IO (V.Vector (DenseMatrix R)) (DenseVector R) (Int, Int, Int)
-as1D :: Reshape2DAs1D
-as1D = Adapter to back
-  where
-    to inp = do
-      let !b = V.length inp
-          (!r,!c) = size (V.head inp)
-      o <- denseVectorConcat $ V.map m2v inp
-      return ((b,r,c),o)
-    back (b,r,c) odelta =
-      return $! V.map (v2m r c) $ denseVectorSplit b (r*c) odelta
 
 instance Component (RunLayer C) where
   type Run (RunLayer C) = IO
@@ -240,6 +206,25 @@ instance Component (RunLayer P) where
       return $ (l, idelta)
     where
       gen (!si,!iv,_) od = unpool stride iv od
+
+-- | Reshape from channels of matrix to a single vector
+-- input:  m channels of 2D matrices
+--         assuming that all matrices are of the same size a x b
+-- output: 1D vector of the concatenation of all input channels
+--         its size: m x a x b
+type Reshape2DAs1D = Adapter IO (V.Vector (DenseMatrix R)) (DenseVector R) (Int, Int, Int)
+as1D :: Reshape2DAs1D
+as1D = Adapter to back
+  where
+    to inp = do
+      let !b = V.length inp
+          (!r,!c) = size (V.head inp)
+      o <- denseVectorConcat $ V.map m2v inp
+      return ((b,r,c),o)
+    back (b,r,c) odelta =
+      return $! V.map (v2m r c) $ denseVectorSplit b (r*c) odelta
+
+
 
 -- | create a new full connect component
 newFLayer :: Int                -- ^ number of input values
