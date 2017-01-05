@@ -23,14 +23,14 @@ data ByHmatrix = ByHmatrix
 instance (TranslateBody s, Component (RunLayer (SpecToTag s))) =>
     Backend ByHmatrix (SpecIn1D :++ s) where
   type Env ByHmatrix = Err
-  type ConvertFromSpec (SpecIn1D :++ s) = RunLayer (SpecToTag s)
+  type ConvertFromSpec ByHmatrix (SpecIn1D :++ s) = RunLayer (SpecToTag s)
   compile _ (a :++ l)= trans (size Nothing a) l
 
 -- with 2D input
 instance (TranslateBody s, Component (RunLayer (SpecToTag s))) =>
     Backend ByHmatrix (SpecIn2D :++ s) where
   type Env ByHmatrix = Err
-  type ConvertFromSpec (SpecIn2D :++ s) = RunLayer (SpecToTag s)
+  type ConvertFromSpec ByHmatrix (SpecIn2D :++ s) = RunLayer (SpecToTag s)
   compile _ (a :++ l)= trans (size Nothing a) l
 
 instance RunInEnv Identity Err where

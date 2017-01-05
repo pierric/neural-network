@@ -15,7 +15,7 @@ import Text.PrettyPrint.Free hiding (flatten, (<>))
 import System.Environment
 
 import Data.Constraint
-foo :: Backend b s => b -> s -> Inp (ConvertFromSpec s) -> Env b (Out (ConvertFromSpec s))
+foo :: Backend b s => b -> s -> Inp (ConvertFromSpec b s) -> Env b (Out (ConvertFromSpec b s))
 foo b s i = case witness b s of Dict -> compile b s >>= run . flip forward i
 
 main = do x <- runExceptT $ do
