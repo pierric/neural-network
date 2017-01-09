@@ -28,6 +28,7 @@ module Data.NeuralNetwork.Backend.BLASHS (
 import Data.NeuralNetwork hiding (relu, relu', cost')
 import Data.NeuralNetwork.Stack
 import Data.NeuralNetwork.Backend.BLASHS.Layers
+import Data.NeuralNetwork.Backend.BLASHS.LSTM
 import Data.NeuralNetwork.Backend.BLASHS.Utils
 import Data.NeuralNetwork.Backend.BLASHS.SIMD
 import Control.Monad.Except
@@ -79,19 +80,21 @@ instance BodySize SpecConvolution where
 instance BodySize SpecMaxPooling where
   bsize (D2 k m n) (MaxPooling s) = D2 k (m `div` s) (n `div` s)
 
-type family SpecToCom s where
+type family SpecToCom s :: * where
   -- 'SpecFullConnect' is translated to a two-layer component
   -- a full-connect, followed by a relu activation (1D, single channel)
-  SpecToCom SpecFullConnect = Stack (RunLayer F) (RunLayer (T SinglVec))
+  SpecToCom SpecFullConnect = Stack (RunLayer F) (RunLayer (T SinglVec)) CE
   -- 'SpecConvolution' is translated to a two-layer component
   -- a convolution, following by a relu activation (2D, multiple channels)
-  SpecToCom SpecConvolution = Stack (RunLayer C) (RunLayer (T MultiMat))
+  SpecToCom SpecConvolution = Stack (RunLayer C) (RunLayer (T MultiMat)) CE
   -- 'MaxPooling' is translated to a max-pooling component.
   SpecToCom SpecMaxPooling = RunLayer P
   -- 'SpecReshape2DAs1D' is translated to a reshaping component.
   SpecToCom SpecReshape2DAs1D = Reshape2DAs1D
+  -- 'SpecLSTM' is translated to a LSTM component.
+  SpecToCom SpecLSTM = LSTM
   -- ':++' is translated to the stacking component.
-  SpecToCom (a :++ b) = Stack (SpecToCom a) (SpecToCom b)
+  SpecToCom (a :++ b) = Stack (SpecToCom a) (SpecToCom b) (LiftRun (Run (SpecToCom a)) (Run (SpecToCom b)))
 
 -- translate the body of specification
 class TranslateBody s where

@@ -14,6 +14,7 @@
 {-# LANGUAGE BangPatterns, TypeFamilies, TypeOperators, FlexibleInstances, FlexibleContexts, GADTs #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 module Data.NeuralNetwork.Backend.BLASHS.LSTM(
+  LSTM(..)
 ) where
 
 import Control.Monad.State.Strict
@@ -31,11 +32,11 @@ type VecR = DenseVector Float
 type MatR = DenseMatrix Float
 type LSTMident = Int
 
-data LSTM = LSTM { parm_w_f :: MatR, parm_w_i :: MatR, parm_w_o :: MatR, parm_w_c :: MatR
-                 , parm_u_f :: MatR, parm_u_i :: MatR, parm_u_o :: MatR
-                 , parm_b_f :: VecR, parm_b_i :: VecR, parm_b_o :: VecR, parm_b_c :: VecR
-                 , lstm_id  :: LSTMident
-                 }
+data LSTM = LLSTM { parm_w_f :: MatR, parm_w_i :: MatR, parm_w_o :: MatR, parm_w_c :: MatR
+                  , parm_u_f :: MatR, parm_u_i :: MatR, parm_u_o :: MatR
+                  , parm_b_f :: VecR, parm_b_i :: VecR, parm_b_o :: VecR, parm_b_c :: VecR
+                  , lstm_id  :: LSTMident
+                  }
   deriving Typeable
 
 instance Data LSTM where
@@ -316,7 +317,7 @@ instance (Data a, Component a, Inp a ~ VecR, Run a ~ Run LSTM) => Component (Str
 
 collectLSTMs :: Data a => a -> [LSTM]
 collectLSTMs = everything (++) ([] `mkQ` isLSTM)
-  where isLSTM a@(LSTM{}) = [a]
+  where isLSTM a@(LLSTM{}) = [a]
 
 sigma  = tanh
 sigma' = tanh'

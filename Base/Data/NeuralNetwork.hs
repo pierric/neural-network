@@ -30,7 +30,8 @@ module Data.NeuralNetwork (
   SpecReshape2DAs1D(..),
   SpecFullConnect(..),
   SpecConvolution(..),
-  SpecMaxPooling(..)
+  SpecMaxPooling(..),
+  SpecLSTM(..)
 ) where
 
 import Data.Data
@@ -102,6 +103,9 @@ data SpecMaxPooling    = MaxPooling  Int
 
 -- | Specification: reshaping layer
 data SpecReshape2DAs1D = Reshape2DAs1D
+  deriving (Typeable, Data)
+
+data SpecLSTM = LSTM
   deriving (Typeable, Data)
 
 -- | Specification: stacking layer

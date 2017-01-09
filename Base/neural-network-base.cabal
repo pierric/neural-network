@@ -19,5 +19,5 @@ library
   exposed-modules:     Data.NeuralNetwork
                        Data.NeuralNetwork.Stack
                        Data.NeuralNetwork.Adapter
-  build-depends:       base >= 4.7 && < 5, constraints
+  build-depends:       base >= 4.7 && < 5, constraints, mtl
   default-language:    Haskell2010

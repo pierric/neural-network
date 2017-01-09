@@ -16,39 +16,35 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts, FlexibleInstances #-}
 {-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE Rank2Types #-}
 module Data.NeuralNetwork.Stack (
   Stack(..),
-  StackLift(..)
+  CE, CL, CR, LiftRun
 ) where
 
 import Data.Data
+import Control.Monad.Trans
 import Data.NeuralNetwork
 
-data Stack a b = Stack a b
+data Stack a b c = Stack a b
   deriving (Typeable, Data)
-data StackLift a b w = StackLift a b (forall t. Run a t -> w t) (forall t. Run b t -> w t)
-  deriving (Typeable)
 
-instance (Data a, Data b, Typeable w) => Data (StackLift a b w) where
-  toConstr _ = stackLiftConstr
-  gfoldl f z (StackLift a b u v) = z (\a b -> StackLift a b u v) `f` a `f` b
-  gunfold k z c = errorWithoutStackTrace "Data.Data.gunfold(StackLift)"
-  dataTypeOf _  = stackLiftDataType
-
-stackLiftConstr   :: Constr
-stackLiftConstr = mkConstr stackLiftDataType "StackLift" ["component1", "component2"] Prefix
-stackLiftDataType :: DataType
-stackLiftDataType = mkDataType "Data.NeuralNetwork.Stack" [stackLiftConstr]
+data CE
+data CL (t :: (* -> *) -> * -> *)
+data CR (t :: (* -> *) -> * -> *)
+type family LiftRun (u :: * -> *) (v :: * -> *) where
+  LiftRun (t m) m = CL t
+  LiftRun m (t m) = CR t
+  LiftRun m m     = CE
 
 instance (Component a, Component b,
-          Run a ~ Run b, Monad (Run a),
+          Monad (Run a), Monad (Run b),
+          Run a ~ Run b,
           Out a ~ Inp b
-         ) => Component (Stack a b) where
-  type Run (Stack a b) = Run a
-  type Inp (Stack a b) = Inp a
-  type Out (Stack a b) = Out b
-  newtype Trace (Stack a b) = S0Trace (Trace b, Trace a)
+         ) => Component (Stack a b CE) where
+  type Run (Stack a b CE) = Run a
+  type Inp (Stack a b CE) = Inp a
+  type Out (Stack a b CE) = Out b
+  newtype Trace (Stack a b CE) = S0Trace (Trace b, Trace a)
   forwardT (Stack a b) !i = do
     !tra <- forwardT a i
     !trb <- forwardT b (output tra)
@@ -60,19 +56,39 @@ instance (Component a, Component b,
     return (Stack a' b', idelta)
 
 instance (Component a, Component b,
-          Monad (Run a), Monad (Run b), Monad w, Typeable w,
+          Monad (Run a), Monad (Run b),
+          MonadTrans t, Run a ~ t (Run b),
           Out a ~ Inp b
-         ) => Component (StackLift a b w) where
-  type Run (StackLift a b w) = w
-  type Inp (StackLift a b w) = Inp a
-  type Out (StackLift a b w) = Out b
-  newtype Trace (StackLift a b w) = S1Trace (Trace b, Trace a)
-  forwardT (StackLift a b la lb) !i = do
-    !tra <- la $ forwardT a i
-    !trb <- lb $ forwardT b (output tra)
+         ) => Component (Stack a b (CL t)) where
+  type Run (Stack a b (CL t)) = Run a
+  type Inp (Stack a b (CL t)) = Inp a
+  type Out (Stack a b (CL t)) = Out b
+  newtype Trace (Stack a b (CL t)) = S1Trace (Trace b, Trace a)
+  forwardT (Stack a b) !i = do
+    !tra <- forwardT a i
+    !trb <- lift $ forwardT b (output tra)
     return $ S1Trace (trb, tra)
   output (S1Trace !a) = output (fst a)
-  backward (StackLift a b la lb) (S1Trace (!trb,!tra)) !odeltb rate = do
-    (b', !odelta) <- lb $ backward b trb odeltb rate
-    (a', !idelta) <- la $ backward a tra odelta rate
-    return (StackLift a' b' la lb, idelta)
+  backward (Stack a b) (S1Trace (!trb,!tra)) !odeltb rate = do
+    (b', !odelta) <- lift $ backward b trb odeltb rate
+    (a', !idelta) <- backward a tra odelta rate
+    return (Stack a' b', idelta)
+
+instance (Component a, Component b,
+          Monad (Run a), Monad (Run b),
+          MonadTrans t, Run b ~ t (Run a),
+          Out a ~ Inp b
+         ) => Component (Stack a b (CR t)) where
+  type Run (Stack a b (CR t)) = Run b
+  type Inp (Stack a b (CR t)) = Inp a
+  type Out (Stack a b (CR t)) = Out b
+  newtype Trace (Stack a b (CR t)) = S2Trace (Trace b, Trace a)
+  forwardT (Stack a b) !i = do
+    !tra <- lift $ forwardT a i
+    !trb <- forwardT b (output tra)
+    return $ S2Trace (trb, tra)
+  output (S2Trace !a) = output (fst a)
+  backward (Stack a b) (S2Trace (!trb,!tra)) !odeltb rate = do
+    (b', !odelta) <- backward b trb odeltb rate
+    (a', !idelta) <- lift $ backward a tra odelta rate
+    return (Stack a' b', idelta)
