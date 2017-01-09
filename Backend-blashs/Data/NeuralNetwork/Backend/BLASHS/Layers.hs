@@ -12,7 +12,9 @@
 -- This module supplies a high level abstraction of the rather
 -- low-level blas-hs interfaces.
 ------------------------------------------------------------
-{-# LANGUAGE BangPatterns, TypeFamilies, TypeOperators, FlexibleInstances, FlexibleContexts, GADTs #-}
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE TypeFamilies, TypeOperators, FlexibleInstances, FlexibleContexts, GADTs #-}
+{-# LANGUAGE StandaloneDeriving, DeriveDataTypeable #-}
 module Data.NeuralNetwork.Backend.BLASHS.Layers(
   SinglVec, MultiMat, F, C, P, T, RunLayer(..),
   Reshape2DAs1D, as1D,
@@ -25,6 +27,7 @@ import System.Random.MWC.Distributions
 import Control.Monad.ST
 import Control.Monad (liftM2, forM_, when)
 import GHC.Float
+import Data.Data
 import Data.STRef
 import Data.NeuralNetwork
 import Data.NeuralNetwork.Adapter
@@ -75,6 +78,40 @@ data RunLayer :: * -> * where
   -- | Activator
   -- the input can be either a 1D vector, 2D matrix, or channels of either.
   Activation :: (SIMDPACK R -> SIMDPACK R, SIMDPACK R -> SIMDPACK R) -> RunLayer (T c)
+
+deriving instance Typeable (RunLayer F)
+deriving instance Typeable (RunLayer C)
+deriving instance Typeable (RunLayer P)
+deriving instance Typeable (RunLayer (T SinglVec))
+deriving instance Typeable (RunLayer (T MultiMat))
+
+instance Data (RunLayer F) where
+  toConstr (Full _ _) = fullConstr
+  gfoldl f z (Full u v) = z (Full u v)
+  gunfold k z c = errorWithoutStackTrace "Data.Data.gunfold(RunLayer F)"
+  dataTypeOf _  = runlayerDataType
+instance Data (RunLayer C) where
+  toConstr (Conv _ _ _) = convConstr
+  gfoldl f z (Conv u v w) = z (Conv u v w)
+  gunfold k z c = errorWithoutStackTrace "Data.Data.gunfold(RunLayer C)"
+  dataTypeOf _  = runlayerDataType
+instance Data (RunLayer P) where
+  toConstr (MaxP _) = maxpConstr
+  gfoldl f z (MaxP u) = z (MaxP u)
+  gunfold k z c = errorWithoutStackTrace "Data.Data.gunfold(RunLayer P)"
+  dataTypeOf _  = runlayerDataType
+instance Typeable a => Data (RunLayer (T a)) where
+  toConstr (Activation _) = actiConstr
+  gfoldl f z (Activation u) = z (Activation u)
+  gunfold k z c = errorWithoutStackTrace "Data.Data.gunfold(RunLayer T)"
+  dataTypeOf _  = runlayerDataType
+
+fullConstr = mkConstr runlayerDataType "Full" ["weights", "biases"] Prefix
+convConstr = mkConstr runlayerDataType "Conv" ["kernels", "biases", "padding"] Prefix
+maxpConstr = mkConstr runlayerDataType "MaxP" ["stride"] Prefix
+actiConstr = mkConstr runlayerDataType "Activation" ["activation function"] Prefix
+runlayerDataType = mkDataType "Data.NeuralNetwork.Backend.BLASHS.Utils.RunLayer"
+                              [fullConstr, convConstr, maxpConstr, actiConstr]
 
 instance Component (RunLayer F) where
     type Run (RunLayer F) = IO

@@ -31,6 +31,7 @@ module Data.NeuralNetwork.Backend.BLASHS.Utils (
   denseVectorToVector,
   denseVectorConcat,
   denseVectorSplit,
+  denseVectorCopy,
   denseMatrixArrayAt,
   denseMatrixArrayToVector,
   denseMatrixArrayFromVector,
@@ -47,6 +48,7 @@ import qualified Data.Vector.Storable.Mutable  as V
 import qualified Data.Vector.Storable.Internal as V
 import Control.Exception
 import Control.Monad
+import Control.Monad.Trans (MonadIO, liftIO)
 import Data.IORef
 import Foreign.Marshal.Array (advancePtr)
 import Data.NeuralNetwork.Backend.BLASHS.SIMD
@@ -61,43 +63,45 @@ data DenseMatrix a = DenseMatrix {-# UNPACK #-}!Int {-# UNPACK #-}!Int {-# UNPAC
 data DenseMatrixArray a = DenseMatrixArray {-# UNPACK #-}!Int {-# UNPACK #-}!Int {-# UNPACK #-}!Int {-# UNPACK #-}!(V.IOVector a)
 
 -- | create a new 'DenseVector'
-newDenseVector :: V.Storable a => Int -> IO (DenseVector a)
-newDenseVector sz = DenseVector <$> V.new sz
+newDenseVector :: (V.Storable a, MonadIO m) => Int -> m (DenseVector a)
+newDenseVector sz = liftIO $ DenseVector <$> V.new sz
 
 -- | create a copy 'DenseVector' from another
-newDenseVectorCopy :: V.Storable a => DenseVector a -> IO (DenseVector a)
-newDenseVectorCopy (DenseVector v) = V.clone v >>= return . DenseVector
+newDenseVectorCopy :: (V.Storable a, MonadIO m) => DenseVector a -> m (DenseVector a)
+newDenseVectorCopy (DenseVector v) = liftIO $ DenseVector <$> V.clone v
 
 -- | create a new 'DenseVector' of some constant
-newDenseVectorConst:: V.Storable a => Int -> a -> IO (DenseVector a)
-newDenseVectorConst n v = V.replicate n v >>= return . DenseVector
+newDenseVectorConst:: (V.Storable a, MonadIO m) => Int -> a -> m (DenseVector a)
+newDenseVectorConst n v = liftIO $ DenseVector <$> V.replicate n v
 
 -- | create a new 'DenseVector' by a random generator
-newDenseVectorByGen :: V.Storable a => IO a -> Int -> IO (DenseVector a)
+newDenseVectorByGen :: (V.Storable a, MonadIO m) => IO a -> Int -> m (DenseVector a)
 newDenseVectorByGen g n = do
-  vals <- V.replicateM n g
+  vals <- liftIO $ V.replicateM n g
   return $ DenseVector vals
 
 -- | create a new 'DenseMatrix'
-newDenseMatrix :: V.Storable a => Int -- ^ number of rows
-                               -> Int -- ^ number of columns
-                               -> IO (DenseMatrix a)
-newDenseMatrix r c = DenseMatrix r c <$> V.new (r*c)
+newDenseMatrix :: (V.Storable a, MonadIO m)
+               => Int -- ^ number of rows
+               -> Int -- ^ number of columns
+               -> m (DenseMatrix a)
+newDenseMatrix r c = liftIO $ DenseMatrix r c <$> V.new (r*c)
 
 -- | create a new 'DenseMatrix' of some constant
-newDenseMatrixConst:: V.Storable a => Int -> Int -> a -> IO (DenseMatrix a)
-newDenseMatrixConst r c v = V.replicate (r*c) v >>= return . DenseMatrix r c
+newDenseMatrixConst:: (V.Storable a, MonadIO m) => Int -> Int -> a -> m (DenseMatrix a)
+newDenseMatrixConst r c v = liftIO $ DenseMatrix r c <$> V.replicate (r*c) v
 
 -- | create a copy 'DenseMatrix' from another
-newDenseMatrixCopy :: V.Storable a => DenseMatrix a -> IO (DenseMatrix a)
-newDenseMatrixCopy (DenseMatrix r c v) = V.clone v >>= return . DenseMatrix r c
+newDenseMatrixCopy :: (V.Storable a, MonadIO m) => DenseMatrix a -> m (DenseMatrix a)
+newDenseMatrixCopy (DenseMatrix r c v) = liftIO $ DenseMatrix r c <$> V.clone v
 
 -- | create a new 'DenseMatrixArray'
-newDenseMatrixArray :: V.Storable a => Int -- ^ number of DenseMatrix
-                                    -> Int -- ^ number of rows
-                                    -> Int -- ^ number of columns
-                                    -> IO (DenseMatrixArray a)
-newDenseMatrixArray n r c = DenseMatrixArray n r c <$> V.new (n*r*c)
+newDenseMatrixArray :: (V.Storable a, MonadIO m)
+                    => Int -- ^ number of DenseMatrix
+                    -> Int -- ^ number of rows
+                    -> Int -- ^ number of columns
+                    -> m (DenseMatrixArray a)
+newDenseMatrixArray n r c = liftIO $ DenseMatrixArray n r c <$> V.new (n*r*c)
 
 -- | get the 'DenseMatrix' from 'DenseMatrixArray' at some position
 denseMatrixArrayAt :: V.Storable a => DenseMatrixArray a -> Int -> DenseMatrix a
@@ -113,7 +117,7 @@ denseMatrixArrayToVector (DenseMatrixArray n r c v) =
 -- If all the matrices are orignally placed consecutively in storage, the result
 -- is simply a type-cast. Otherwise, a new storage is obtained, and matrices are
 -- copied.
-denseMatrixArrayFromVector :: V.Storable a => BV.Vector (DenseMatrix a) -> IO (DenseMatrixArray a)
+denseMatrixArrayFromVector :: (V.Storable a, MonadIO m) => BV.Vector (DenseMatrix a) -> m (DenseMatrixArray a)
 denseMatrixArrayFromVector vm = do
   let n = BV.length vm
       DenseMatrix r c (V.MVector _ ptr0) = BV.head vm
@@ -130,26 +134,27 @@ v2ma n r c (DenseVector v) = assert (V.length v == n*r*c) $ DenseMatrixArray n r
 ma2v (DenseMatrixArray n r c v) = DenseVector v
 
 -- | convert a 'DenseVector' to a vector of elements
-denseVectorToVector :: V.Storable a => DenseVector a -> IO (BV.Vector a)
-denseVectorToVector (DenseVector vs) = SV.unsafeFreeze vs >>= return . BV.convert
+denseVectorToVector :: (V.Storable a, MonadIO m) => DenseVector a -> m (BV.Vector a)
+denseVectorToVector (DenseVector vs) = liftIO $ SV.unsafeFreeze vs >>= return . BV.convert
 
 -- | concatenate a vector of 'DenseVector's.
 -- If all the dense-vectors are orignally placed consecutively in storage, the result
 -- is simply a type-cast. Otherwise, a new storage is obtained, and dense-vectors are
 -- copied.
-denseVectorConcat :: V.Storable a => BV.Vector (DenseVector a) -> IO (DenseVector a)
+denseVectorConcat :: (V.Storable a, MonadIO m)
+                  => BV.Vector (DenseVector a) -> m (DenseVector a)
 denseVectorConcat vs = do
   let n = BV.length vs
       DenseVector (V.MVector sz0 ptr0) = BV.head vs
-  cont <- newIORef True
-  size <- newIORef sz0
+  cont <- liftIO $ newIORef True
+  size <- liftIO $ newIORef sz0
   forM_ [0..n-2] $ \i -> do
     let DenseVector (V.MVector sz1 ptr1) = vs BV.! i
         DenseVector (V.MVector sz2 ptr2) = vs BV.! (i+1)
-    modifyIORef cont (&& (V.getPtr ptr1 `advancePtr` sz1) == V.getPtr ptr2)
-    modifyIORef size (+ sz2)
-  cont <- readIORef cont
-  size <- readIORef size
+    liftIO $ modifyIORef cont (&& (V.getPtr ptr1 `advancePtr` sz1) == V.getPtr ptr2)
+    liftIO $ modifyIORef size (+ sz2)
+  cont <- liftIO $ readIORef cont
+  size <- liftIO $ readIORef size
   if cont
     then do
       return $ DenseVector $ V.unsafeFromForeignPtr0 ptr0 size
@@ -164,7 +169,7 @@ denseVectorConcat vs = do
         else do
           let DenseVector src = BV.head vs
               (v1, v2) = V.splitAt (V.length src) vt
-          V.unsafeCopy v1 src
+          liftIO $ V.unsafeCopy v1 src
           go v2 (BV.tail vs)
 
 -- | split a 'DenseVector' into a vector of 'DenseVector's.
@@ -180,20 +185,23 @@ sliceM (DenseMatrix r c d) (x,y) = assert (x>=0 && x<r && y>=0 && y<c) $ DenseVe
 dropV n (DenseVector v) = DenseVector (V.unsafeDrop n v)
 
 copyV (DenseVector v1) (DenseVector v2) len =
-  assert (V.length v1 >= len && V.length v2 >= len) $
+  assert (V.length v1 >= len && V.length v2 >= len) $ liftIO $
   V.unsafeCopy (V.unsafeTake len v1) (V.unsafeTake len v2)
 
-unsafeReadV :: V.Storable a => DenseVector a -> Int -> IO a
-unsafeReadV (DenseVector v) i = V.unsafeRead v i
+denseVectorCopy :: (V.Storable a, MonadIO m) => DenseVector a -> DenseVector a -> m ()
+denseVectorCopy t s = assert (size t >= size s) $ copyV t s (size s)
 
-unsafeWriteV :: V.Storable a => DenseVector a -> Int -> a -> IO ()
-unsafeWriteV (DenseVector v) i a = V.unsafeWrite v i a
+unsafeReadV :: (V.Storable a, MonadIO m) => DenseVector a -> Int -> m a
+unsafeReadV (DenseVector v) i = liftIO $ V.unsafeRead v i
 
-unsafeReadM :: V.Storable a => DenseMatrix a -> (Int, Int) -> IO a
-unsafeReadM (DenseMatrix r c v) (i,j) = assert (i < r && j < c) $ V.unsafeRead v (i*c+j)
+unsafeWriteV :: (V.Storable a, MonadIO m) => DenseVector a -> Int -> a -> m ()
+unsafeWriteV (DenseVector v) i a = liftIO $ V.unsafeWrite v i a
 
-unsafeWriteM :: V.Storable a => DenseMatrix a -> (Int, Int) -> a -> IO ()
-unsafeWriteM (DenseMatrix r c v) (i,j) a = assert (i < r && j < c) $ V.unsafeWrite v (i*c+j) a
+unsafeReadM :: (V.Storable a, MonadIO m) => DenseMatrix a -> (Int, Int) -> m a
+unsafeReadM (DenseMatrix r c v) (i,j) = assert (i < r && j < c) $ liftIO $ V.unsafeRead v (i*c+j)
+
+unsafeWriteM :: (V.Storable a, MonadIO m) => DenseMatrix a -> (Int, Int) -> a -> m ()
+unsafeWriteM (DenseMatrix r c v) (i,j) a = assert (i < r && j < c) $ liftIO $ V.unsafeWrite v (i*c+j) a
 
 -- | The Size class provides a interface to tell the dimension of a
 -- dense-vector, dense-matrix, or dense-matrix-array.
@@ -250,89 +258,97 @@ data Op :: (* -> *) -> * -> * where
 -- | Perform an operation
 class AssignTo c a where
   -- | store the result of a Op to the lhs
-  (<<=) :: c a -> Op c a -> IO ()
+  (<<=) :: MonadIO m => c a -> Op c a -> m ()
   -- | add the result of a Op to the lhs and store
-  (<<+) :: c a -> Op c a -> IO ()
+  (<<+) :: MonadIO m => c a -> Op c a -> m ()
 
 instance (Numeric a, V.Storable a, SIMDable a) => AssignTo DenseVector a where
   (DenseVector v) <<= (DenseVector x :<# DenseMatrix r c y) =
-    assert (V.length x == r && V.length v == c) $ gemv_helper Trans r c 1.0 y c x 0.0 v
+    assert (V.length x == r && V.length v == c) $ liftIO $
+      gemv_helper Trans r c 1.0 y c x 0.0 v
 
   (DenseVector v) <<= (DenseMatrix r c x :#> DenseVector y) =
-    assert (V.length y == c && V.length v == r) $ gemv_helper NoTrans r c 1.0 x c y 0.0 v
+    assert (V.length y == c && V.length v == r) $ liftIO $
+      gemv_helper NoTrans r c 1.0 x c y 0.0 v
 
   (DenseVector v) <<= (DenseVector x :.* DenseVector y) =
     let sz = V.length v
-    in assert (sz == V.length x && sz == V.length y) $
+    in assert (sz == V.length x && sz == V.length y) $ liftIO $
        hadamard times v x y
 
   (DenseVector v) <<= (DenseVector x :.+ DenseVector y) =
     let sz = V.length v
-    in assert (sz == V.length x && sz == V.length y) $
+    in assert (sz == V.length x && sz == V.length y) $ liftIO $
        hadamard plus v x y
 
   (DenseVector v) <<= Scale s =
-    V.unsafeWith v (\pv -> scal (V.length v) s pv 1)
+    liftIO $ V.unsafeWith v (\pv -> scal (V.length v) s pv 1)
 
-  (DenseVector v) <<= Apply f = foreach f v v
+  (DenseVector v) <<= Apply f = liftIO $ foreach f v v
 
-  (DenseVector v) <<= ZipWith f (DenseVector x) (DenseVector y) = hadamard f v x y
+  (DenseVector v) <<= ZipWith f (DenseVector x) (DenseVector y) = liftIO $ hadamard f v x y
 
   (DenseVector v) <<= Scale' a (DenseMatrix r c x :#> DenseVector y) =
-    assert (V.length y == c && V.length v == r) $ gemv_helper NoTrans r c a x c y 0.0 v
+    assert (V.length y == c && V.length v == r) $ liftIO $
+      gemv_helper NoTrans r c a x c y 0.0 v
 
   _ <<= _ = error "Unsupported Op [Vector <<=]."
 
   (DenseVector v) <<+ (DenseVector x :<# DenseMatrix r c y) =
-    assert (V.length x == r && V.length v == c) $ gemv_helper Trans r c 1.0 y c x 1.0 v
+    assert (V.length x == r && V.length v == c) $ liftIO $
+      gemv_helper Trans r c 1.0 y c x 1.0 v
 
   (DenseVector v) <<+ (DenseMatrix r c x :#> DenseVector y) =
-    assert (V.length y == c && V.length v == r) $ gemv_helper NoTrans r c 1.0 x c y 1.0 v
+    assert (V.length y == c && V.length v == r) $ liftIO $
+      gemv_helper NoTrans r c 1.0 x c y 1.0 v
 
   (DenseVector v) <<+ Scale' a (DenseMatrix r c x :#> DenseVector y) =
-    assert (V.length y == c && V.length v == r) $ gemv_helper NoTrans r c a x c y 1.0 v
+    assert (V.length y == c && V.length v == r) $ liftIO $
+      gemv_helper NoTrans r c a x c y 1.0 v
 
   _ <<+ _ = error "Unsupported Op [Vector <<+]."
 
 instance (Numeric a, V.Storable a, SIMDable a) => AssignTo DenseMatrix a where
   (DenseMatrix vr vc v) <<= (DenseMatrix xr xc x :<> DenseMatrix yr yc y) =
-    assert (xc == yc && vc == xr && vr == yr) $ do
+    assert (xc == yc && vc == xr && vr == yr) $ liftIO $
       gemm_helper Trans NoTrans xr yr xc 1.0 x xc y xc 0.0 v xr
 
   (DenseMatrix vr vc v) <<= (DenseMatrix xr xc x :.* DenseMatrix yr yc y) =
-    assert (vr == xr && vr == yr && vc == xc && vc == yc) $ hadamard times v x y
+    assert (vr == xr && vr == yr && vc == xc && vc == yc) $ liftIO $
+      hadamard times v x y
 
   (DenseMatrix vr vc v) <<= (DenseMatrix xr xc x :.+ DenseMatrix yr yc y) =
-    assert (vr == xr && vr == yr && vc == xc && vc == yc) $ hadamard plus v x y
+    assert (vr == xr && vr == yr && vc == xc && vc == yc) $ liftIO $
+      hadamard plus v x y
 
   (DenseMatrix r c v) <<= Scale s =
     let sz = V.length v
-    in assert (sz == r * c) $
+    in assert (sz == r * c) $ liftIO $
        V.unsafeWith v (\pv -> scal sz s pv 1)
 
   (DenseMatrix r c v) <<= Apply f = (DenseVector v) <<= Apply f
 
   (DenseMatrix vr vc v) <<= Scale' a (DenseMatrix xr xc x :<> DenseMatrix yr yc y) =
-    assert (xc == yc && vc == xr && vr == yr) $ do
+    assert (xc == yc && vc == xr && vr == yr) $ liftIO $
       gemm_helper Trans NoTrans xr yr xc a x xc y xc 0.0 v xr
 
   _ <<= _ = error "Unsupported Op [Matrix <<=]."
 
   (DenseMatrix vr vc v) <<+ (DenseMatrix xr xc x :<> DenseMatrix yr yc y) =
-    assert (xc == yc && vc == xr && vr == yr) $ do
+    assert (xc == yc && vc == xr && vr == yr) $ liftIO $
       gemm_helper Trans NoTrans xr yr xc 1.0 x xc y xc 1.0 v xr
 
   (DenseMatrix vr vc v) <<+ (DenseVector x :## DenseVector y) =
     let m = V.length x
         n = V.length y
-    in assert (m == vr && n == vc) $
+    in assert (m == vr && n == vc) $ liftIO $
        V.unsafeWith v (\pv ->
        V.unsafeWith x (\px ->
        V.unsafeWith y (\py ->
          geru RowMajor m n 1.0 px 1 py 1 pv n)))
 
   (DenseMatrix vr vc v)  <<+ Scale' a (DenseMatrix xr xc x :<> DenseMatrix yr yc y) =
-    assert (xc == yc && vc == xr && vr == yr) $ do
+    assert (xc == yc && vc == xr && vr == yr) $ liftIO $
       gemm_helper Trans NoTrans xr yr xc a x xc y xc 1.0 v xr
 
   _ <<+ _ = error "Unsupported Op [Matrix <<+]."
@@ -348,21 +364,21 @@ instance (Numeric a, V.Storable a, SIMDable a) => AssignTo DenseMatrixArray a wh
   _ <<+ _ = error "Unsupported Op [MatrixArray <<+]."
 
 -- | sum up all elements in the 'DenseMatrix'
-sumElements :: (V.Storable a, Num a) => DenseMatrix a -> IO a
+sumElements :: (V.Storable a, Num a, MonadIO m) => DenseMatrix a -> m a
 sumElements (DenseMatrix r c v) = go v (r*c) 0
   where
     go v 0  !s = return s
-    go v !n !s = do a <- V.unsafeRead v 0
+    go v !n !s = do a <- liftIO $ V.unsafeRead v 0
                     go (V.unsafeTail v) (n-1) (a+s)
 
 -- | 2D correlation.
 -- Apply a vector of kernels to a dense-matrix with some zero-padding.
-corr2 :: (V.Storable a, Numeric a)
+corr2 :: (V.Storable a, Numeric a, MonadIO m)
       => Int                             -- ^ number of 0s padded around
       -> BV.Vector (DenseMatrix a)       -- ^ vector of kernels
       -> DenseMatrix a                   -- ^ matrix to be operated
-      -> (Op DenseMatrixArray a -> IO b) -- ^ how to perform the final operation
-      -> IO b
+      -> (Op DenseMatrixArray a -> m b)  -- ^ how to perform the final operation
+      -> m b
 corr2 p ks m fun = do
   let k0      = BV.head ks
       (kr,kc) = size k0
@@ -377,12 +393,12 @@ corr2 p ks m fun = do
 
 -- | 2D convolution.
 -- Apply a vector of kernels to a dense-matrix with some zero-padding.
-conv2 :: (V.Storable a, Numeric a)
+conv2 :: (V.Storable a, Numeric a, MonadIO m)
       => Int                             -- ^ number of 0s padded around
       -> BV.Vector (DenseMatrix a)       -- ^ vector of kernels
       -> DenseMatrix a                   -- ^ matrix to be operated
-      -> (Op DenseMatrixArray a -> IO b) -- ^ how to perform the final operation
-      -> IO b
+      -> (Op DenseMatrixArray a -> m b)  -- ^ how to perform the final operation
+      -> m b
 conv2 p ks m fun = do
   let k0      = BV.head ks
       (kr,kc) = size k0
@@ -398,13 +414,13 @@ conv2 p ks m fun = do
   forM_ [0..nk-1] $ \i -> do
     let DenseMatrix _ _ d = denseMatrixArrayAt knl i
     let DenseMatrix _ _ s = ks BV.! (nk-1-i)
-    V.unsafeCopy d s
+    liftIO $ V.unsafeCopy d s
   reverseV v
   fun $ UnsafeM2MA $ wrk :<> DenseMatrix nk (kr*kc) v
   where
     reverseV v = let e = V.length v
                      m = e `div` 2
-                 in forM_ [0..m] (\i -> V.unsafeSwap v i (e-1-i))
+                 in forM_ [0..m] (\i -> liftIO $ V.unsafeSwap v i (e-1-i))
 
 zero m mr mc p = do
   zpd <- newDenseMatrix (mr+2*p) (mc+2*p)
@@ -415,19 +431,19 @@ zero m mr mc p = do
   return zpd
 
 fill wrk@(DenseMatrix _ _ vwrk) m u v kr kc = do
-  refv <- newIORef (DenseVector vwrk)
+  refv <- liftIO $ newIORef (DenseVector vwrk)
   forM_ [0..u-1] $ \i -> do
     forM_ [0..v-1] $ \j -> do
       forM_ [0..kr-1] $ \k -> do
-        t <- readIORef refv
+        t <- liftIO $ readIORef refv
         let s = sliceM m (i+k, j)
         copyV t s kc
-        writeIORef refv (dropV kc t)
+        liftIO $ writeIORef refv (dropV kc t)
 
 -- | max-pooling, picking out the maximum element in each stride x stride
 -- sub-matrices. Assuming that the original matrix row and column size are
 -- both multiple of stride.
-pool :: Int -> DenseMatrix Float -> IO (DenseVector Int, DenseMatrix Float)
+pool :: MonadIO m => Int -> DenseMatrix Float -> m (DenseVector Int, DenseMatrix Float)
 pool 1 mat = do
   let (r,c) = size mat
   vi <- newDenseVector (r*c)
@@ -446,21 +462,21 @@ pool stride mat = do
     r'    = r `div` stride
     c'    = c `div` stride
     unsafeMaxIndEle mm x y r c = do
-      mp <- newIORef 0
-      mv <- newIORef (-10000.0)
+      mp <- liftIO $ newIORef 0
+      mv <- liftIO $ newIORef (-10000.0)
       forM_ [0..r-1] $ \ i -> do
         forM_ [0..c-1] $ \ j -> do
           v1 <- unsafeReadM mm (x+i, y+j)
-          v0 <- readIORef mv
+          v0 <- liftIO $ readIORef mv
           when (v1 > v0) $ do
-            writeIORef mv v1
-            writeIORef mp (i*stride+j)
-      p <- readIORef mp
-      v <- readIORef mv
+            liftIO $ writeIORef mv v1
+            liftIO $ writeIORef mp (i*stride+j)
+      p <- liftIO $ readIORef mp
+      v <- liftIO $ readIORef mv
       return (p, v)
 
 -- | The reverse of max-pooling.
-unpool :: Int -> DenseVector Int -> DenseMatrix Float -> IO (DenseMatrix Float)
+unpool :: MonadIO m => Int -> DenseVector Int -> DenseMatrix Float -> m (DenseMatrix Float)
 unpool stride idx mat = do
   mat' <- newDenseMatrix r' c'
   forM_ [0..r-1] $ \i -> do
@@ -477,13 +493,13 @@ unpool stride idx mat = do
 -- | transpose a vector of 'DenseMatrixArray'
 -- The result is vector of vector of 'DenseMatrix', because the matrices are
 -- no longer placed consecutively in storage.
-transpose :: V.Storable a => BV.Vector (DenseMatrixArray a) -> IO (BV.Vector (BV.Vector (DenseMatrix a)))
+transpose :: (V.Storable a, MonadIO m) => BV.Vector (DenseMatrixArray a) -> m (BV.Vector (BV.Vector (DenseMatrix a)))
 transpose vma = do
   let DenseMatrixArray n _ _ _  = BV.head vma
       !vv = BV.map (\i -> BV.map (`denseMatrixArrayAt` i) vma) $ BV.enumFromN 0 n
   return vv
 
-gemv_helper :: Numeric a
+gemv_helper :: (Numeric a, MonadIO m)
             => Transpose
             -> Int -> Int
             -> a
@@ -491,14 +507,15 @@ gemv_helper :: Numeric a
             -> Int
             -> V.IOVector a
             -> a
-            -> V.IOVector a -> IO ()
+            -> V.IOVector a -> m ()
 gemv_helper trans row col alpha x lda y beta v =
+  liftIO $
   V.unsafeWith x (\px ->
   V.unsafeWith y (\py ->
   V.unsafeWith v (\pv ->
     gemv RowMajor trans row col alpha px lda py 1 beta pv 1)))
 
-gemm_helper :: Numeric a
+gemm_helper :: (Numeric a, MonadIO m)
             => Transpose
             -> Transpose
             -> Int -> Int -> Int
@@ -510,8 +527,9 @@ gemm_helper :: Numeric a
             -> a
             -> V.IOVector a
             -> Int
-            -> IO ()
+            -> m ()
 gemm_helper transA transB rowA colB colA alpha x xlda y ylda beta v vlda =
+  liftIO $
   V.unsafeWith x (\px ->
   V.unsafeWith y (\py ->
   V.unsafeWith v (\pv -> do

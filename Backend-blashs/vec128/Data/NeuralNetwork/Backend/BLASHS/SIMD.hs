@@ -56,12 +56,14 @@ class SIMDable a where
   plus     :: SIMDPACK a -> SIMDPACK a -> SIMDPACK a
   minus    :: SIMDPACK a -> SIMDPACK a -> SIMDPACK a
   times    :: SIMDPACK a -> SIMDPACK a -> SIMDPACK a
+  divide   :: SIMDPACK a -> SIMDPACK a -> SIMDPACK a
 
 instance SIMDable Float where
   data SIMDPACK Float = FloatX4 FloatX4#
   plus   (FloatX4 a) (FloatX4 b) = FloatX4 (plusFloatX4#  a b)
   minus  (FloatX4 a) (FloatX4 b) = FloatX4 (minusFloatX4# a b)
   times  (FloatX4 a) (FloatX4 b) = FloatX4 (timesFloatX4# a b)
+  divide (FloatX4 a) (FloatX4 b) = FloatX4 (divideFloatX4# a b)
   hadamard op v x y = assert (MV.length x == sz && MV.length y == sz) $ do
     let sv = unsafeCast v :: IOVector (SIMDPACK Float)
         sx = unsafeCast x :: IOVector (SIMDPACK Float)

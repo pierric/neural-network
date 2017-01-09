@@ -16,6 +16,7 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE DeriveDataTypeable #-}
 module Data.NeuralNetwork (
   Component(..),
   learn,
@@ -32,6 +33,7 @@ module Data.NeuralNetwork (
   SpecMaxPooling(..)
 ) where
 
+import Data.Data
 import Data.Constraint
 
 -- | Abstraction of a neural network component
@@ -80,25 +82,32 @@ cost' a y | y == 1 && a >= y = 0
 
 -- | Specification: 1D input
 data SpecIn1D          = In1D Int     -- ^ dimension of input
+  deriving (Typeable, Data)
 
 -- | Specification: 2D input
 data SpecIn2D          = In2D Int Int -- ^ dimension of input
+  deriving (Typeable, Data)
 
 -- | Specification: full connection layer
 data SpecFullConnect   = FullConnect Int  -- ^ number of neurals
+  deriving (Typeable, Data)
 
 -- | Specification: convolution layer
 data SpecConvolution   = Convolution Int Int Int -- ^ number of output channels, size of kernel, size of padding
+  deriving (Typeable, Data)
 
 -- | Specification: max pooling layer
 data SpecMaxPooling    = MaxPooling  Int
+  deriving (Typeable, Data)
 
 -- | Specification: reshaping layer
 data SpecReshape2DAs1D = Reshape2DAs1D
+  deriving (Typeable, Data)
 
 -- | Specification: stacking layer
 infixr 0 :++
 data a :++ b = a :++ b
+  deriving (Typeable, Data)
 
 -- | Abstraction of backend to carry out the specification
 class Backend b s where

@@ -30,13 +30,14 @@ class SIMDable a where
   plus  :: SIMDPACK a -> SIMDPACK a -> SIMDPACK a
   minus :: SIMDPACK a -> SIMDPACK a -> SIMDPACK a
   times :: SIMDPACK a -> SIMDPACK a -> SIMDPACK a
-
+  divide   :: SIMDPACK a -> SIMDPACK a -> SIMDPACK a
 
 instance SIMDable Float where
   newtype SIMDPACK Float = F { unF :: Float}
   plus  (F a) (F b) = F (a + b)
   minus (F a) (F b) = F (a - b)
   times (F a) (F b) = F (a * b)
+  divide (F a) (F b) = F (a / b)
   hadamard op v x y = assert (MV.length x == sz && MV.length y == sz) $ do
     go sz v x y
     where
