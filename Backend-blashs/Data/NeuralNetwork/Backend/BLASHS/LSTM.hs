@@ -288,7 +288,7 @@ newtype Stream a = Stream a
   deriving (Typeable, Data)
 
 instance (Data a, Component a, Inp a ~ VecR, Run a ~ Run LSTM) => Component (Stream a) where
-  type Run (Stream a) = Run a
+  type Run (Stream a) = IO
   type Inp (Stream a) = [Inp a]
   type Out (Stream a) = [Out a]
   newtype Trace (Stream a) = StreamTrace [Trace a]
@@ -297,18 +297,16 @@ instance (Data a, Component a, Inp a ~ VecR, Run a ~ Run LSTM) => Component (Str
     st <- forM (collectLSTMs c) (\lstm -> do
             vec <- newDenseVector (size $ head xs)
             return (lstm_id lstm, Left vec))
-    put (M.fromList st)
     -- forward each input one by one, where the state is implicitly propagated.
-    trs <- mapM (forwardT c) xs
+    trs <- flip evalStateT (M.fromList st) (mapM (forwardT c) xs)
     return $ StreamTrace trs
   output (StreamTrace trace) = map output trace
   backward (Stream c) (StreamTrace trace) delta_out rate = do
     -- set initial state for all LSTMs
     st <- forM (collectLSTMs c) (\lstm ->
             return (lstm_id lstm, Right NextNothing))
-    put (M.fromList st)
     -- backward for each input one by one, and accumulate all updates
-    (c, delta_inp) <- foldrM step (c, []) (zip trace delta_out)
+    (c, delta_inp) <- flip evalStateT (M.fromList st) $ foldrM step (c, []) (zip trace delta_out)
     return (Stream c, delta_inp)
     where
       step (tr,dout) (c,ds) = do
