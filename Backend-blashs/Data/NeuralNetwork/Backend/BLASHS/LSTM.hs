@@ -14,7 +14,7 @@
 {-# LANGUAGE BangPatterns, TypeFamilies, TypeOperators, FlexibleInstances, FlexibleContexts, GADTs #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 module Data.NeuralNetwork.Backend.BLASHS.LSTM(
-  LSTM(..)
+  LSTM(..), LSTM_Env_Transformer, newLSTM, Stream(..),
 ) where
 
 import Control.Monad.State.Strict
@@ -23,10 +23,16 @@ import qualified Data.Vector as V
 import qualified Data.Map as M
 import Data.Data
 import Data.Generics
+import Data.IORef
+import System.IO.Unsafe (unsafePerformIO)
 import Prelude hiding (tanh)
 import Data.NeuralNetwork
+import Data.NeuralNetwork.Adapter
 import Data.NeuralNetwork.Backend.BLASHS.Utils
 import Data.NeuralNetwork.Backend.BLASHS.SIMD
+import System.Random.MWC
+import System.Random.MWC.Distributions
+import GHC.Float (double2Float)
 
 type VecR = DenseVector Float
 type MatR = DenseMatrix Float
@@ -48,6 +54,45 @@ instance Data LSTM where
 lstmConstr = mkConstr lstmDataType "LSTM" ["identifier"] Prefix
 lstmDataType = mkDataType "Data.NeuralNetwork.Backend.BLASHS.LSTM.LSTM" [lstmConstr]
 
+global_LSTM_id_counter :: IORef Int
+global_LSTM_id_counter = unsafePerformIO (newIORef 0)
+-- | create a new LSTM component
+newLSTM :: Int        -- ^ number of input size
+        -> Int        -- ^ number of output size
+        -> IO LSTM    -- ^ the new layer
+newLSTM m n =
+  withSystemRandom . asGenIO $ \gen -> do
+    let newM = do raw <- newDenseVectorByGen (double2Float <$> normal 0 0.01 gen) (m*n)
+                  return $ v2m m n raw
+        newV = newDenseVectorConst n 1
+    parm_w_f <- newM
+    parm_w_i <- newM
+    parm_w_o <- newM
+    parm_w_c <- newM
+    parm_u_f <- newM
+    parm_u_i <- newM
+    parm_u_o <- newM
+    parm_b_f <- newV
+    parm_b_i <- newV
+    parm_b_o <- newV
+    parm_b_c <- newV
+    lstm_id  <- readIORef global_LSTM_id_counter
+    modifyIORef' global_LSTM_id_counter (+1)
+    return $ LLSTM {
+      parm_w_f = parm_w_f,
+      parm_w_i = parm_w_i,
+      parm_w_o = parm_w_o,
+      parm_w_c = parm_w_c,
+      parm_u_f = parm_u_f,
+      parm_u_i = parm_u_i,
+      parm_u_o = parm_u_o,
+      parm_b_f = parm_b_f,
+      parm_b_i = parm_b_i,
+      parm_b_o = parm_b_o,
+      parm_b_c = parm_b_c,
+      lstm_id  = lstm_id
+    }
+
 -- state passed forward
 type LSTMstreamPrev = VecR
 -- state passed backward
@@ -57,11 +102,13 @@ data LSTMstreamNext = NextNothing
 -- sum-type of the forward and backward state
 type LSTMstreamInfo = Either LSTMstreamPrev LSTMstreamNext
 
+type LSTM_Env_Transformer = StateT (M.Map LSTMident LSTMstreamInfo)
+
 instance Component LSTM where
   -- The state is mapping from LSTM identifier to Info.
   -- So when mutiple LSTM compoents are stacked, each can
   -- access its own state.
-  type Run LSTM = StateT (M.Map LSTMident LSTMstreamInfo) IO
+  type Run LSTM = LSTM_Env_Transformer IO
   type Inp LSTM = VecR
   type Out LSTM = VecR
   data Trace LSTM = LTrace { tr_mf, tr_mi, tr_mo, tr_n, tr_f, tr_i, tr_o, tr_c', tr_c, tr_inp, tr_out :: VecR }

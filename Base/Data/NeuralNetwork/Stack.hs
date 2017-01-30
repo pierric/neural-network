@@ -26,7 +26,16 @@ import Control.Monad.Trans
 import Data.NeuralNetwork
 
 data Stack a b c = Stack a b
-  deriving (Typeable, Data)
+  deriving Typeable
+
+instance (Data a, Data b, Typeable c) => Data (Stack a b c) where
+  toConstr a = stackConstr
+  gfoldl f z (Stack a b) = z Stack `f` a `f` b
+  gunfold k z c = errorWithoutStackTrace "Data.Data.gunfold(Stack)"
+  dataTypeOf _  = stackDataType
+
+stackConstr = mkConstr stackDataType "Stack" ["a", "b"] Prefix
+stackDataType = mkDataType "Data.NeuralNetwork.Stack.Stack" [stackConstr]
 
 data CE
 data CL (t :: (* -> *) -> * -> *)

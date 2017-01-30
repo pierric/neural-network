@@ -27,11 +27,14 @@ module Data.NeuralNetwork (
   (:++)(..),
   SpecIn1D(..),
   SpecIn2D(..),
+  SpecInString(..),
   SpecReshape2DAs1D(..),
   SpecFullConnect(..),
   SpecConvolution(..),
   SpecMaxPooling(..),
-  SpecLSTM(..)
+  SpecLSTM(..),
+  SpecFlow(..),
+  SpecMeanPooling(..),
 ) where
 
 import Data.Data
@@ -89,6 +92,9 @@ data SpecIn1D          = In1D Int     -- ^ dimension of input
 data SpecIn2D          = In2D Int Int -- ^ dimension of input
   deriving (Typeable, Data)
 
+data SpecInString      = InString
+  deriving (Typeable, Data)
+
 -- | Specification: full connection layer
 data SpecFullConnect   = FullConnect Int  -- ^ number of neurals
   deriving (Typeable, Data)
@@ -101,11 +107,18 @@ data SpecConvolution   = Convolution Int Int Int -- ^ number of output channels,
 data SpecMaxPooling    = MaxPooling  Int
   deriving (Typeable, Data)
 
+-- | Specification: max pooling layer
+data SpecMeanPooling   = MeanPooling  Int
+  deriving (Typeable, Data)
+
 -- | Specification: reshaping layer
 data SpecReshape2DAs1D = Reshape2DAs1D
   deriving (Typeable, Data)
 
-data SpecLSTM = LSTM
+data SpecLSTM = LSTM Int
+  deriving (Typeable, Data)
+
+data SpecFlow a = Flow a
   deriving (Typeable, Data)
 
 -- | Specification: stacking layer

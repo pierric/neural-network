@@ -20,9 +20,14 @@
 module Data.NeuralNetwork.Backend.BLASHS (
   -- module Data.NeuralNetwork.Backend.BLASHS.Layers,
   module Data.NeuralNetwork.Backend.BLASHS.Utils,
+  module Data.NeuralNetwork.Backend.BLASHS.LSTM,
   ByBLASHS(..),
   ErrCode(..),
-  cost'
+  cost',
+  LayerSize(..),
+  HeadSize(..),
+  BodySize(..),
+  TranslateBody(..),
 ) where
 
 import Data.NeuralNetwork hiding (relu, relu', cost')
@@ -59,11 +64,13 @@ instance RunInEnv IO Err where
 -- It is necessary to propagate the size along the layers,
 -- because fullconnect and convolution need to know
 -- the previous size.
-data LayerSize = D1 Int | D2 Int Int Int
+data LayerSize = D1 Int | D2 Int Int Int | SV LayerSize | SF Int LayerSize
 
 -- 'HeadSize' is class for the input layer
 class HeadSize l where
   hsize :: l -> LayerSize
+instance HeadSize SpecInString where
+  hsize InString = SV (D1 1)
 instance HeadSize SpecIn1D where
   hsize (In1D n) = D1 n
 instance HeadSize SpecIn2D where
@@ -79,46 +86,62 @@ instance BodySize SpecConvolution where
   bsize (D2 _ m n) (Convolution k f p) = D2 k (m+2*p-f+1) (n+2*p-f+1)
 instance BodySize SpecMaxPooling where
   bsize (D2 k m n) (MaxPooling s) = D2 k (m `div` s) (n `div` s)
-
-type family SpecToCom s :: * where
-  -- 'SpecFullConnect' is translated to a two-layer component
-  -- a full-connect, followed by a relu activation (1D, single channel)
-  SpecToCom SpecFullConnect = Stack (RunLayer F) (RunLayer (T SinglVec)) CE
-  -- 'SpecConvolution' is translated to a two-layer component
-  -- a convolution, following by a relu activation (2D, multiple channels)
-  SpecToCom SpecConvolution = Stack (RunLayer C) (RunLayer (T MultiMat)) CE
-  -- 'MaxPooling' is translated to a max-pooling component.
-  SpecToCom SpecMaxPooling = RunLayer P
-  -- 'SpecReshape2DAs1D' is translated to a reshaping component.
-  SpecToCom SpecReshape2DAs1D = Reshape2DAs1D
-  -- 'SpecLSTM' is translated to a LSTM component.
-  SpecToCom SpecLSTM = LSTM
-  -- ':++' is translated to the stacking component.
-  SpecToCom (a :++ b) = Stack (SpecToCom a) (SpecToCom b) (LiftRun (Run (SpecToCom a)) (Run (SpecToCom b)))
+instance BodySize SpecLSTM where
+  bsize (SV (D1 _)) (LSTM n)= SV (D1 n)
+instance BodySize a => BodySize (SpecFlow a) where
+  bsize (SV sz) (Flow a) = SV (bsize sz a)
+  bsize (SF n sz) (Flow a) = SF n (bsize sz a)
 
 -- translate the body of specification
 class TranslateBody s where
+  type SpecToCom s
   trans :: LayerSize -> s -> Err (SpecToCom s)
 
 instance TranslateBody SpecFullConnect where
+  -- 'SpecFullConnect' is translated to a two-layer component
+  -- a full-connect, followed by a relu activation (1D, single channel)
+  type SpecToCom SpecFullConnect = Stack (RunLayer F) (RunLayer (T SinglVec)) CE
   trans (D1 s) (FullConnect n) = do u <- lift $ newFLayer s n
                                     return $ Stack u (Activation (relu, relu'))
   trans _ _ = throwError ErrMismatch
 
 instance TranslateBody SpecConvolution where
+  -- 'SpecConvolution' is translated to a two-layer component
+  -- a convolution, following by a relu activation (2D, multiple channels)
+  type SpecToCom SpecConvolution = Stack (RunLayer C) (RunLayer (T MultiMat)) CE
   trans (D2 k s t) (Convolution n f p) = do u <- lift $ newCLayer k n f p
                                             return $ Stack u (Activation (relu, relu'))
   trans _ _ = throwError ErrMismatch
 
 instance TranslateBody SpecMaxPooling where
+  -- 'MaxPooling' is translated to a max-pooling component.
+  type SpecToCom SpecMaxPooling = RunLayer P
   trans (D2 _ _ _) (MaxPooling n) = return (MaxP n)
-  trans (D1 _)     _              = throwError ErrMismatch
+  trans _ _ = throwError ErrMismatch
 
 instance TranslateBody SpecReshape2DAs1D where
+  -- 'SpecReshape2DAs1D' is translated to a reshaping component.
+  type SpecToCom SpecReshape2DAs1D = Reshape2DAs1D
   trans (D2 _ _ _) _ = return as1D
-  trans (D1 _)     _ = throwError ErrMismatch
+  trans _ _ = throwError ErrMismatch
+
+instance TranslateBody SpecLSTM where
+  -- 'SpecLSTM' is translated to a LSTM component.
+  type SpecToCom SpecLSTM = Stack LSTM (RunLayer (T SinglVec)) (LiftRun (Run LSTM) (Run (RunLayer (T SinglVec))))
+  trans (D1 s) (LSTM n) = do u <- lift $ newLSTM s n
+                             return $ Stack u (Activation (relu, relu'))
+  trans _ _ = throwError ErrMismatch
+
+instance (TranslateBody a) => TranslateBody (SpecFlow a) where
+  --
+  type SpecToCom (SpecFlow a) = Stream (SpecToCom a)
+  trans (SV s) (Flow a) = do u <- trans s a
+                             return $ Stream u
+  trans _ _ = throwError ErrMismatch
 
 instance (TranslateBody a, TranslateBody c, BodySize a) => TranslateBody (a :++ c) where
+  -- ':++' is translated to the stacking component.
+  type SpecToCom (a :++ b) = Stack (SpecToCom a) (SpecToCom b) (LiftRun (Run (SpecToCom a)) (Run (SpecToCom b)))
   trans s (a :++ c) = do u <- trans s a
                          v <- trans (bsize s a) c
                          return $ Stack u v
