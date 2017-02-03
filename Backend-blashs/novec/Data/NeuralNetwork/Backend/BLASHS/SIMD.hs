@@ -15,12 +15,14 @@
 {-# LANGUAGE TypeFamilies, FlexibleContexts #-}
 module Data.NeuralNetwork.Backend.BLASHS.SIMD (
   SIMDable(..),
-  cost', relu, relu'
+  cost', relu, relu', tanh, tanh'
 )  where
 
 import Data.Vector.Storable.Mutable as MV
 import Control.Exception
 import qualified Data.NeuralNetwork as B
+import qualified Prelude as Prelude (tanh)
+import Prelude hiding (tanh)
 
 class SIMDable a where
   data SIMDPACK a
@@ -69,3 +71,7 @@ relu' (F a) = F $ B.relu' a
 -- | SIMD based, derivative of error measurement
 cost' :: SIMDPACK Float -> SIMDPACK Float -> SIMDPACK Float
 cost' (F a) (F b) = F (B.cost' a b)
+
+tanh, tanh' :: SIMDPACK Float -> SIMDPACK Float
+tanh (F x)  = F (Prelude.tanh x)
+tanh' (F x) = let a = Prelude.tanh x in F (1 - a*a)

@@ -37,7 +37,8 @@ module Data.NeuralNetwork.Backend.BLASHS.Utils (
   denseMatrixArrayFromVector,
   v2m, m2v, v2ma, ma2v,
   Op(..), AssignTo(..),
-  sumElements, corr2, conv2, pool, unpool, transpose
+  sumElements, corr2, conv2, pool, unpool, transpose,
+  prettyDenseVectorFloat
 ) where
 
 import Blas.Generic.Unsafe
@@ -51,6 +52,9 @@ import Control.Monad
 import Control.Monad.Trans (MonadIO, liftIO)
 import Data.IORef
 import Foreign.Marshal.Array (advancePtr)
+import Text.Printf (printf)
+import qualified Text.PrettyPrint.Free as P
+import System.IO.Unsafe (unsafePerformIO)
 import Data.NeuralNetwork.Backend.BLASHS.SIMD
 
 -- | mutable vector type
@@ -255,6 +259,18 @@ data Op :: (* -> *) -> * -> * where
   -- becomes a matrix. This Op is only used internally inside this module
   UnsafeM2MA :: Op DenseMatrix a -> Op DenseMatrixArray a
 
+instance Show (Op t v) where
+  show (a :<# b) = ":<#"
+  show (a :#> b) = ":>#"
+  show (a :<> b) = ":<>"
+  show (a :## b) = ":##"
+  show (a :.* b) = ":.*"
+  show (Scale a) = "Scale"
+  show (Apply a) = "Apply"
+  show (ZipWith a b c) = "ZipWith"
+  show (Scale' a b) = "Scale'"
+  show (UnsafeM2MA a) = "UnsafeM2MA"
+
 -- | Perform an operation
 class AssignTo c a where
   -- | store the result of a Op to the lhs
@@ -292,7 +308,7 @@ instance (Numeric a, V.Storable a, SIMDable a) => AssignTo DenseVector a where
     assert (V.length y == c && V.length v == r) $ liftIO $
       gemv_helper NoTrans r c a x c y 0.0 v
 
-  _ <<= _ = error "Unsupported Op [Vector <<=]."
+  _ <<= op = error $ "Unsupported Op [Vector <<= " ++ show op ++ "]."
 
   (DenseVector v) <<+ (DenseVector x :<# DenseMatrix r c y) =
     assert (V.length x == r && V.length v == c) $ liftIO $
@@ -306,7 +322,21 @@ instance (Numeric a, V.Storable a, SIMDable a) => AssignTo DenseVector a where
     assert (V.length y == c && V.length v == r) $ liftIO $
       gemv_helper NoTrans r c a x c y 1.0 v
 
-  _ <<+ _ = error "Unsupported Op [Vector <<+]."
+  (DenseVector v) <<+ (DenseVector x :.* DenseVector y) =
+    let sz = V.length v
+    in assert (sz == V.length x && sz == V.length y) $ liftIO $ do
+       DenseVector t <- newDenseVector sz
+       hadamard times t x y
+       hadamard plus v v t
+
+  (DenseVector v) <<+ (DenseVector x :.+ DenseVector y) =
+    let sz = V.length v
+    in assert (sz == V.length x && sz == V.length y) $ liftIO $ do
+       DenseVector t <- newDenseVector sz
+       hadamard plus t x y
+       hadamard plus v v t
+
+  _ <<+ op = error $ "Unsupported Op [Vector <<+ " ++ show op ++ "]."
 
 instance (Numeric a, V.Storable a, SIMDable a) => AssignTo DenseMatrix a where
   (DenseMatrix vr vc v) <<= (DenseMatrix xr xc x :<> DenseMatrix yr yc y) =
@@ -332,7 +362,7 @@ instance (Numeric a, V.Storable a, SIMDable a) => AssignTo DenseMatrix a where
     assert (xc == yc && vc == xr && vr == yr) $ liftIO $
       gemm_helper Trans NoTrans xr yr xc a x xc y xc 0.0 v xr
 
-  _ <<= _ = error "Unsupported Op [Matrix <<=]."
+  _ <<= op = error $ "Unsupported Op [Matrix <<= " ++ show op ++ "]."
 
   (DenseMatrix vr vc v) <<+ (DenseMatrix xr xc x :<> DenseMatrix yr yc y) =
     assert (xc == yc && vc == xr && vr == yr) $ liftIO $
@@ -351,7 +381,7 @@ instance (Numeric a, V.Storable a, SIMDable a) => AssignTo DenseMatrix a where
     assert (xc == yc && vc == xr && vr == yr) $ liftIO $
       gemm_helper Trans NoTrans xr yr xc a x xc y xc 1.0 v xr
 
-  _ <<+ _ = error "Unsupported Op [Matrix <<+]."
+  _ <<+ op = error $ "Unsupported Op [Matrix <<+ " ++ show op ++ "]."
 
 instance (Numeric a, V.Storable a, SIMDable a) => AssignTo DenseMatrixArray a where
   ma <<= UnsafeM2MA op = let ma2m (DenseMatrixArray n r c v) = DenseMatrix n (r*c) v
@@ -534,3 +564,7 @@ gemm_helper transA transB rowA colB colA alpha x xlda y ylda beta v vlda =
   V.unsafeWith y (\py ->
   V.unsafeWith v (\pv -> do
     gemm ColMajor transA transB rowA colB colA alpha px xlda py ylda beta pv vlda)))
+
+prettyDenseVectorFloat :: DenseVector Float -> P.Doc e
+prettyDenseVectorFloat vec = let a = unsafePerformIO (denseVectorToVector vec)
+                             in P.encloseSep P.langle P.rangle P.comma $ map (P.text . printf "%.02f") (BV.toList a)

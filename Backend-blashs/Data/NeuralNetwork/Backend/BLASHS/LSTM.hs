@@ -33,6 +33,7 @@ import Data.NeuralNetwork.Backend.BLASHS.SIMD
 import System.Random.MWC
 import System.Random.MWC.Distributions
 import GHC.Float (double2Float)
+import qualified Text.PrettyPrint.Free as P
 
 type VecR = DenseVector Float
 type MatR = DenseMatrix Float
@@ -62,20 +63,22 @@ newLSTM :: Int        -- ^ number of input size
         -> IO LSTM    -- ^ the new layer
 newLSTM m n =
   withSystemRandom . asGenIO $ \gen -> do
-    let newM = do raw <- newDenseVectorByGen (double2Float <$> normal 0 0.01 gen) (m*n)
+    let newW = do raw <- newDenseVectorByGen (double2Float <$> normal 0 0.01 gen) (m*n)
                   return $ v2m m n raw
-        newV = newDenseVectorConst n 1
-    parm_w_f <- newM
-    parm_w_i <- newM
-    parm_w_o <- newM
-    parm_w_c <- newM
-    parm_u_f <- newM
-    parm_u_i <- newM
-    parm_u_o <- newM
-    parm_b_f <- newV
-    parm_b_i <- newV
-    parm_b_o <- newV
-    parm_b_c <- newV
+        newU = do raw <- newDenseVectorByGen (double2Float <$> normal 0 0.01 gen) (n*n)
+                  return $ v2m n n raw
+        newB = newDenseVectorConst n 1
+    parm_w_f <- newW
+    parm_w_i <- newW
+    parm_w_o <- newW
+    parm_w_c <- newW
+    parm_u_f <- newU
+    parm_u_i <- newU
+    parm_u_o <- newU
+    parm_b_f <- newB
+    parm_b_i <- newB
+    parm_b_o <- newB
+    parm_b_c <- newB
     lstm_id  <- readIORef global_LSTM_id_counter
     modifyIORef' global_LSTM_id_counter (+1)
     return $ LLSTM {
@@ -114,28 +117,30 @@ instance Component LSTM where
   data Trace LSTM = LTrace { tr_mf, tr_mi, tr_mo, tr_n, tr_f, tr_i, tr_o, tr_c', tr_c, tr_inp, tr_out :: VecR }
   forwardT lstm x_t = do
     Just (Left c_tm1) <- gets (M.lookup $ lstm_id lstm)
-    mf_t  <- newDenseVector (size x_t)
+
+    let osize = snd $ size (parm_w_f lstm)
+    mf_t  <- newDenseVector osize
     mf_t <<= x_t   :<# parm_w_f lstm
     mf_t <<+ c_tm1 :<# parm_u_f lstm
     mf_t <<= mf_t  :.+ parm_b_f lstm
     f_t   <- newDenseVectorCopy mf_t
     f_t  <<= Apply sigma
 
-    mi_t <- newDenseVector (size x_t)
+    mi_t <- newDenseVector osize
     mi_t <<= x_t   :<# parm_w_i lstm
     mi_t <<+ c_tm1 :<# parm_u_i lstm
     mi_t <<= mi_t  :.+ parm_b_i lstm
     i_t   <- newDenseVectorCopy mi_t
     i_t  <<= Apply sigma
 
-    mo_t <- newDenseVector (size x_t)
+    mo_t <- newDenseVector osize
     mo_t <<= x_t   :<# parm_w_o lstm
     mo_t <<+ c_tm1 :<# parm_u_o lstm
     mo_t <<= mo_t  :.+ parm_b_o lstm
     o_t   <- newDenseVectorCopy mo_t
     o_t  <<= Apply sigma
 
-    n_t  <- newDenseVector (size x_t)
+    n_t  <- newDenseVector osize
     n_t  <<= x_t :<# parm_w_c lstm
     n_t  <<= n_t :.+ parm_b_c lstm
 
@@ -235,43 +240,43 @@ instance Component LSTM where
     tmp <<= Apply sigma'
     tmp <<= tmp :.* tr_i trace
     tmp <<= tmp :.* delta_ct
-    delta_wc <<= tmp :## tr_inp trace
+    delta_wc <<+ tmp :## tr_inp trace
 
     delta_wf <- uncurry newDenseMatrix (size (parm_w_f lstm))
     denseVectorCopy tmp (tr_mf trace)
     tmp <<= Apply sigma'
     tmp <<= tmp :.* delta_ft
-    delta_wf <<= tmp :## tr_inp trace
+    delta_wf <<+ tmp :## tr_inp trace
 
     delta_wi <- uncurry newDenseMatrix (size (parm_w_i lstm))
     denseVectorCopy tmp (tr_mi trace)
     tmp <<= Apply sigma'
     tmp <<= tmp :.* delta_it
-    delta_wi <<= tmp :## tr_inp trace
+    delta_wi <<+ tmp :## tr_inp trace
 
     delta_wo <- uncurry newDenseMatrix (size (parm_w_o lstm))
     denseVectorCopy tmp (tr_mo trace)
     tmp <<= Apply sigma'
     tmp <<= tmp :.* delta_ot
-    delta_wo <<= tmp :## tr_inp trace
+    delta_wo <<+ tmp :## tr_inp trace
 
     delta_uf <- uncurry newDenseMatrix (size (parm_u_f lstm))
     denseVectorCopy tmp (tr_mf trace)
     tmp <<= Apply sigma'
     tmp <<= tmp :.* delta_ft
-    delta_uf <<= tmp :## tr_c' trace
+    delta_uf <<+ tmp :## tr_c' trace
 
     delta_ui <- uncurry newDenseMatrix (size (parm_u_i lstm))
     denseVectorCopy tmp (tr_mi trace)
     tmp <<= Apply sigma'
     tmp <<= tmp :.* delta_it
-    delta_ui <<= tmp :## tr_c' trace
+    delta_ui <<+ tmp :## tr_c' trace
 
     delta_uo <- uncurry newDenseMatrix (size (parm_u_o lstm))
     denseVectorCopy tmp (tr_mo trace)
     tmp <<= Apply sigma'
     tmp <<= tmp :.* delta_ot
-    delta_uo <<= tmp :## tr_c' trace
+    delta_uo <<+ tmp :## tr_c' trace
 
     delta_inp <- newDenseVector (size delta_out)
     tmp <- newDenseVectorCopy (tr_mf trace)
@@ -366,10 +371,3 @@ collectLSTMs = everything (++) ([] `mkQ` isLSTM)
 
 sigma  = tanh
 sigma' = tanh'
-
-tanh  x = let x2 = times x x
-              x3 = times x x2
-          in minus x (divide x3 (konst 3))
-tanh' x = let a = tanh x
-              b = times a a
-          in minus (konst 1) b

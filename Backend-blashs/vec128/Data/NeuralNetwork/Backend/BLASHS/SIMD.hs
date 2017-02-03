@@ -19,14 +19,14 @@ module Data.NeuralNetwork.Backend.BLASHS.SIMD (
   compareVector,
   selectVector,
   SIMDable(..),
-  cost', relu, relu'
+  cost', relu, relu', tanh, tanh'
 ) where
 
 import Data.Vector.Storable.Mutable as MV
 import qualified Data.Vector.Storable as SV
 import Control.Exception
 import Control.Monad
-
+import Prelude hiding (tanh)
 import GHC.Prim
 import GHC.Base
 import GHC.Exts
@@ -138,6 +138,14 @@ cost' a y = selectVector (compareVector GE a y)
                 (broadcastVector 0)
                 (minus a y))
               (minus a y)
+
+tanh, tanh' :: SIMDPACK Float -> SIMDPACK Float
+tanh  x = let x2 = times x x
+              x3 = times x x2
+          in minus x (divide x3 (konst 3))
+tanh' x = let a = tanh x
+              b = times a a
+          in minus (konst 1) b
 
 instance Storable (SIMDPACK Float) where
     sizeOf x     = vectorSize x * elementSize x

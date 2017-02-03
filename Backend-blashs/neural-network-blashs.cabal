@@ -42,7 +42,7 @@ library
         hs-source-dirs: ., novec
 
   build-depends:       base >= 4.7 && < 5, blas-hs, mwc-random, mtl, vector,
-                       constraints, ghc-prim, containers, syb,
+                       constraints, ghc-prim, containers, syb, wl-pprint-extras,
                        neural-network-base
   exposed-modules:     Data.NeuralNetwork.Backend.BLASHS
   other-modules:       Data.NeuralNetwork.Backend.BLASHS.Layers

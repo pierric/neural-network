@@ -69,8 +69,8 @@ data LayerSize = D1 Int | D2 Int Int Int | SV LayerSize | SF Int LayerSize
 -- 'HeadSize' is class for the input layer
 class HeadSize l where
   hsize :: l -> LayerSize
-instance HeadSize SpecInString where
-  hsize InString = SV (D1 1)
+instance HeadSize SpecInStream where
+  hsize InStream = SV (D1 1)
 instance HeadSize SpecIn1D where
   hsize (In1D n) = D1 n
 instance HeadSize SpecIn2D where
@@ -87,7 +87,7 @@ instance BodySize SpecConvolution where
 instance BodySize SpecMaxPooling where
   bsize (D2 k m n) (MaxPooling s) = D2 k (m `div` s) (n `div` s)
 instance BodySize SpecLSTM where
-  bsize (SV (D1 _)) (LSTM n)= SV (D1 n)
+  bsize (D1 _) (LSTM n)= D1 n
 instance BodySize a => BodySize (SpecFlow a) where
   bsize (SV sz) (Flow a) = SV (bsize sz a)
   bsize (SF n sz) (Flow a) = SF n (bsize sz a)

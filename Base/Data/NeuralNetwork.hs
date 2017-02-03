@@ -27,7 +27,7 @@ module Data.NeuralNetwork (
   (:++)(..),
   SpecIn1D(..),
   SpecIn2D(..),
-  SpecInString(..),
+  SpecInStream(..),
   SpecReshape2DAs1D(..),
   SpecFullConnect(..),
   SpecConvolution(..),
@@ -92,7 +92,7 @@ data SpecIn1D          = In1D Int     -- ^ dimension of input
 data SpecIn2D          = In2D Int Int -- ^ dimension of input
   deriving (Typeable, Data)
 
-data SpecInString      = InString
+data SpecInStream      = InStream
   deriving (Typeable, Data)
 
 -- | Specification: full connection layer
