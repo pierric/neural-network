@@ -84,6 +84,30 @@ cost' :: (Num a, Ord a) => a -> a -> a
 cost' a y | y == 1 && a >= y = 0
           | otherwise        = a - y
 
+{--
+We can improve the predefined specifications by a feature like
+"open Kinds", when it is ready:
+https://ghc.haskell.org/trac/ghc/wiki/GhcKinds/KindsWithoutData
+
+data kind open SpecKind
+data kind member SpecIn1D :: SpecKind
+data kind member SpecFlow :: SpecKind -> SpecKind
+...
+
+data family Specification :: SpecKind -> *
+data instance Specification SpecIn1D = In1D Int
+data instance Specification (SpecFlow a) = Flow (Specification a)
+...
+
+class Backend b (Specification s) where
+  type Env b :: * -> *
+  type ConvertFromSpec b s :: *
+  compile :: b -> Specification s -> Env b (ConvertFromSpec b s)
+
+The Major benefit would be that compiler could tell more if there
+is an error when inferring the compiled neural network type.
+--}
+
 -- | Specification: 1D input
 data SpecIn1D          = In1D Int     -- ^ dimension of input
   deriving (Typeable, Data)

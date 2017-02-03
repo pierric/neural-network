@@ -14,8 +14,10 @@
 ------------------------------------------------------------
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE FlexibleContexts, FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses, FlexibleContexts, FlexibleInstances #-}
 {-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE UndecidableInstances #-}
 module Data.NeuralNetwork.Stack (
   Stack(..),
   CE, CL, CR, LiftRun
@@ -24,6 +26,7 @@ module Data.NeuralNetwork.Stack (
 import Data.Data
 import Control.Monad.Trans
 import Data.NeuralNetwork
+import Data.NeuralNetwork.Common
 
 data Stack a b c = Stack a b
   deriving Typeable
@@ -101,3 +104,10 @@ instance (Component a, Component b,
     (b', !odelta) <- backward b trb odeltb rate
     (a', !idelta) <- lift $ backward a tra odelta rate
     return (Stack a' b', idelta)
+
+instance (Monad m, TranslateBody m a, TranslateBody m c, BodySize a) => TranslateBody m (a :++ c) where
+  -- ':++' is translated to the stacking component.
+  type SpecToCom (a :++ b) = Stack (SpecToCom a) (SpecToCom b) (LiftRun (Run (SpecToCom a)) (Run (SpecToCom b)))
+  trans s (a :++ c) = do u <- trans s a
+                         v <- trans (bsize s a) c
+                         return $ Stack u v

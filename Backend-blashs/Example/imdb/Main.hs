@@ -1,7 +1,8 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses, FlexibleContexts, FlexibleInstances #-}
+{-# LANGUAGE UndecidableInstances #-}
 module Main where
 
 import qualified Data.Text as Text
@@ -17,6 +18,7 @@ import System.FilePath
 import System.Directory
 import Text.PrettyPrint.Free hiding ((</>))
 import Data.NeuralNetwork hiding (cost')
+import Data.NeuralNetwork.Common
 import Data.NeuralNetwork.Adapter
 import Data.NeuralNetwork.Backend.BLASHS
 
@@ -92,26 +94,13 @@ main = do let cc = InStream :++ -- Debug "i0" :++
                    v <<= ZipWith cost' a b
                    return v
 
-data SpecDebug a = Debug String deriving (Typeable, Data)
-type Debug a = Adapter IO a a ()
-instance BodySize (SpecDebug a) where
-  bsize s (Debug _) = s
-instance Pretty a => TranslateBody (SpecDebug a) where
-  type SpecToCom (SpecDebug a) = Debug a
-  trans s (Debug name)= return $ Adapter to back
-    where
-      to inp = do putStrLn $ (name ++ "-(Forward):" )
-                  putStrLn $ showPretty $ indent 2 $ pretty inp
-                  return ((), inp)
-      back _ odelta = return odelta
-
 data SpecCutoff = Cutoff Int deriving (Typeable, Data)
 type Cutoff = Adapter IO [DenseVector Float] [DenseVector Float] Int
 
 instance BodySize SpecCutoff where
   bsize (SV (D1 s)) (Cutoff n) = SF n (D1 s)
 
-instance TranslateBody SpecCutoff where
+instance MonadError ErrCode m => TranslateBody m SpecCutoff where
   --
   type SpecToCom SpecCutoff = Cutoff
   trans (SV (D1 s)) (Cutoff n) = return $ cutoff n
@@ -133,7 +122,7 @@ type Concat = Adapter IO [DenseVector Float] (DenseVector Float) (Int, Int)
 instance BodySize SpecConcat where
   bsize (SF m (D1 n)) Concat = D1 (m*n)
 
-instance TranslateBody SpecConcat where
+instance MonadError ErrCode m => TranslateBody m SpecConcat where
   type SpecToCom SpecConcat = Concat
   trans (SF m (D1 n)) Concat = return nconcat
     where

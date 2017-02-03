@@ -24,14 +24,11 @@ module Data.NeuralNetwork.Backend.BLASHS (
   ByBLASHS(..),
   ErrCode(..),
   cost',
-  LayerSize(..),
-  HeadSize(..),
-  BodySize(..),
-  TranslateBody(..),
 ) where
 
 import Data.NeuralNetwork hiding (relu, relu', cost')
 import Data.NeuralNetwork.Stack
+import Data.NeuralNetwork.Common
 import Data.NeuralNetwork.Backend.BLASHS.Layers
 import Data.NeuralNetwork.Backend.BLASHS.LSTM
 import Data.NeuralNetwork.Backend.BLASHS.Utils
@@ -49,7 +46,7 @@ data ErrCode = ErrMismatch
 data ByBLASHS = ByBLASHS
 
 -- | Neural network specified to start with 1D / 2D input
-instance (HeadSize z, TranslateBody s,
+instance (HeadSize z, TranslateBody Err s,
           Component (SpecToCom s),
           RunInEnv (Run (SpecToCom s)) Err)
        => Backend ByBLASHS (z :++ s) where
@@ -61,43 +58,7 @@ instance (HeadSize z, TranslateBody s,
 instance RunInEnv IO Err where
   run = liftIO
 
--- It is necessary to propagate the size along the layers,
--- because fullconnect and convolution need to know
--- the previous size.
-data LayerSize = D1 Int | D2 Int Int Int | SV LayerSize | SF Int LayerSize
-
--- 'HeadSize' is class for the input layer
-class HeadSize l where
-  hsize :: l -> LayerSize
-instance HeadSize SpecInStream where
-  hsize InStream = SV (D1 1)
-instance HeadSize SpecIn1D where
-  hsize (In1D n) = D1 n
-instance HeadSize SpecIn2D where
-  hsize (In2D m n) = D2 1 m n
--- 'BodySize' is class for the actual computational layers
-class BodySize l where
-  bsize :: LayerSize -> l -> LayerSize
-instance BodySize SpecReshape2DAs1D where
-  bsize (D2 k m n) _ = D1 (k*m*n)
-instance BodySize SpecFullConnect where
-  bsize _ (FullConnect n) = D1 n
-instance BodySize SpecConvolution where
-  bsize (D2 _ m n) (Convolution k f p) = D2 k (m+2*p-f+1) (n+2*p-f+1)
-instance BodySize SpecMaxPooling where
-  bsize (D2 k m n) (MaxPooling s) = D2 k (m `div` s) (n `div` s)
-instance BodySize SpecLSTM where
-  bsize (D1 _) (LSTM n)= D1 n
-instance BodySize a => BodySize (SpecFlow a) where
-  bsize (SV sz) (Flow a) = SV (bsize sz a)
-  bsize (SF n sz) (Flow a) = SF n (bsize sz a)
-
--- translate the body of specification
-class TranslateBody s where
-  type SpecToCom s
-  trans :: LayerSize -> s -> Err (SpecToCom s)
-
-instance TranslateBody SpecFullConnect where
+instance TranslateBody Err SpecFullConnect where
   -- 'SpecFullConnect' is translated to a two-layer component
   -- a full-connect, followed by a relu activation (1D, single channel)
   type SpecToCom SpecFullConnect = Stack (RunLayer F) (RunLayer (T SinglVec)) CE
@@ -105,7 +66,7 @@ instance TranslateBody SpecFullConnect where
                                     return $ Stack u (Activation (relu, relu'))
   trans _ _ = throwError ErrMismatch
 
-instance TranslateBody SpecConvolution where
+instance TranslateBody Err SpecConvolution where
   -- 'SpecConvolution' is translated to a two-layer component
   -- a convolution, following by a relu activation (2D, multiple channels)
   type SpecToCom SpecConvolution = Stack (RunLayer C) (RunLayer (T MultiMat)) CE
@@ -113,35 +74,28 @@ instance TranslateBody SpecConvolution where
                                             return $ Stack u (Activation (relu, relu'))
   trans _ _ = throwError ErrMismatch
 
-instance TranslateBody SpecMaxPooling where
+instance TranslateBody Err SpecMaxPooling where
   -- 'MaxPooling' is translated to a max-pooling component.
   type SpecToCom SpecMaxPooling = RunLayer P
   trans (D2 _ _ _) (MaxPooling n) = return (MaxP n)
   trans _ _ = throwError ErrMismatch
 
-instance TranslateBody SpecReshape2DAs1D where
+instance TranslateBody Err SpecReshape2DAs1D where
   -- 'SpecReshape2DAs1D' is translated to a reshaping component.
   type SpecToCom SpecReshape2DAs1D = Reshape2DAs1D
   trans (D2 _ _ _) _ = return as1D
   trans _ _ = throwError ErrMismatch
 
-instance TranslateBody SpecLSTM where
+instance TranslateBody Err SpecLSTM where
   -- 'SpecLSTM' is translated to a LSTM component.
   type SpecToCom SpecLSTM = Stack LSTM (RunLayer (T SinglVec)) (LiftRun (Run LSTM) (Run (RunLayer (T SinglVec))))
   trans (D1 s) (LSTM n) = do u <- lift $ newLSTM s n
                              return $ Stack u (Activation (relu, relu'))
   trans _ _ = throwError ErrMismatch
 
-instance (TranslateBody a) => TranslateBody (SpecFlow a) where
+instance (TranslateBody Err a) => TranslateBody Err (SpecFlow a) where
   --
   type SpecToCom (SpecFlow a) = Stream (SpecToCom a)
   trans (SV s) (Flow a) = do u <- trans s a
                              return $ Stream u
   trans _ _ = throwError ErrMismatch
-
-instance (TranslateBody a, TranslateBody c, BodySize a) => TranslateBody (a :++ c) where
-  -- ':++' is translated to the stacking component.
-  type SpecToCom (a :++ b) = Stack (SpecToCom a) (SpecToCom b) (LiftRun (Run (SpecToCom a)) (Run (SpecToCom b)))
-  trans s (a :++ c) = do u <- trans s a
-                         v <- trans (bsize s a) c
-                         return $ Stack u v
