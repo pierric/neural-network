@@ -15,7 +15,8 @@
 module Data.NeuralNetwork.Debug where
 
 import Data.Data
-import Control.Monad.Trans
+import Control.Monad.Trans (liftIO, MonadIO)
+import Control.Monad.Except (MonadError)
 import Text.PrettyPrint.Free hiding ((</>))
 import Data.NeuralNetwork.Common
 import Data.NeuralNetwork.Adapter
@@ -27,7 +28,7 @@ type Debug a = Adapter IO a a ()
 instance BodySize (SpecDebug a) where
   bsize s (Debug _) = s
 
-instance (Pretty a, MonadIO m) => TranslateBody m (SpecDebug a) where
+instance (Pretty a, MonadIO m, MonadError ErrCode m) => TranslateBody m (SpecDebug a) where
   type SpecToCom (SpecDebug a) = Debug a
   trans s (Debug name)= return $ Adapter to back
     where

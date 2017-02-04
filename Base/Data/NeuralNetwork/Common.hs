@@ -16,8 +16,10 @@ module Data.NeuralNetwork.Common(
   HeadSize(..),
   BodySize(..),
   TranslateBody(..),
+  ErrCode(..),
 ) where
 
+import Control.Monad.Except (MonadError)
 import Data.NeuralNetwork
 
 -- It is necessary to propagate the size along the layers,
@@ -53,6 +55,8 @@ instance BodySize a => BodySize (SpecFlow a) where
   bsize (SF n sz) (Flow a) = SF n (bsize sz a)
 
 -- translate the body of specification
-class TranslateBody m s where
+class MonadError ErrCode m => TranslateBody m s where
   type SpecToCom s
   trans :: LayerSize -> s -> m (SpecToCom s)
+
+data ErrCode = ErrMismatch

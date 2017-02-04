@@ -19,7 +19,6 @@ module Data.NeuralNetwork.Backend.BLASHS (
   module Data.NeuralNetwork.Backend.BLASHS.Utils,
   module Data.NeuralNetwork.Backend.BLASHS.LSTM,
   ByBLASHS(..),
-  ErrCode(..),
   cost',
 ) where
 
@@ -30,14 +29,13 @@ import Data.NeuralNetwork.Backend.BLASHS.Layers
 import Data.NeuralNetwork.Backend.BLASHS.LSTM
 import Data.NeuralNetwork.Backend.BLASHS.Utils
 import Data.NeuralNetwork.Backend.BLASHS.SIMD
-import Control.Monad.Except
+import Control.Monad.Except (ExceptT, throwError)
 import Control.Monad.State
 import Data.Constraint (Dict(..))
 
 -- | Compilation of the specification of a neural network is carried out in
 -- the 'Err' monad, and the possible errors are characterized by 'ErrCode'.
 type Err     = ExceptT ErrCode IO
-data ErrCode = ErrMismatch
 
 -- | The backend data type
 data ByBLASHS = ByBLASHS
