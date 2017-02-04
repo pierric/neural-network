@@ -13,7 +13,7 @@ cabal-version:       >=1.10
 library
   exposed-modules:     Data.NeuralNetwork.Backend.HMatrix
   other-modules:       Data.NeuralNetwork.Backend.HMatrix.Layers
-  build-depends:       base >= 4.7 && < 5, hmatrix, mwc-random, mtl,
+  build-depends:       base >= 4.7 && < 5, hmatrix, mwc-random, mtl, constraints,
                        vector, deepseq, parallel, neural-network-base
   default-language:    Haskell2010
   if os(windows)
