@@ -1,6 +1,17 @@
-{-# LANGUAGE MultiParamTypeClasses, FlexibleContexts, FlexibleInstances #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE DeriveDataTypeable #-}
+------------------------------------------------------------
+-- |
+-- Module      :  Data.NeuralNetwork.Debug
+-- Description :  Neural network in abstract
+-- Copyright   :  (c) 2016 Jiasen Wu
+-- License     :  BSD-style (see the file LICENSE)
+-- Maintainer  :  Jiasen Wu <jiasenwu@hotmail.com>
+-- Stability   :  experimental
+-- Portability :  portable
+--
+--
+-- This module defines a layer that does nothing but
+-- print of the input.
+------------------------------------------------------------
 module Data.NeuralNetwork.Debug where
 
 import Data.Data

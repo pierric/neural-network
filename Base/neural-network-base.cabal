@@ -23,3 +23,5 @@ library
                        Data.NeuralNetwork.Debug
   build-depends:       base >= 4.7 && < 5, constraints, mtl, wl-pprint-extras
   default-language:    Haskell2010
+  default-extensions:  TypeFamilies, DeriveDataTypeable, MultiParamTypeClasses,
+                       FlexibleContexts, FlexibleInstances

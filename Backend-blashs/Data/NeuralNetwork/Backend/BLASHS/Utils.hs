@@ -12,9 +12,6 @@
 -- This module supplies a high level abstraction of the rather
 -- low-level blas-hs interfaces.
 ------------------------------------------------------------
-{-# LANGUAGE TypeFamilies, TypeOperators, GADTs #-}
-{-# LANGUAGE MultiParamTypeClasses, FlexibleInstances #-}
-{-# LANGUAGE BangPatterns #-}
 module Data.NeuralNetwork.Backend.BLASHS.Utils (
   DenseVector(..),
   DenseMatrix(..),

@@ -11,8 +11,6 @@
 --
 -- This module supplies a LSTM component.
 ------------------------------------------------------------
-{-# LANGUAGE BangPatterns, TypeFamilies, TypeOperators, FlexibleInstances, FlexibleContexts, GADTs #-}
-{-# LANGUAGE DeriveDataTypeable #-}
 module Data.NeuralNetwork.Backend.BLASHS.LSTM(
   LSTM(..), LSTM_Env_Transformer, newLSTM, Stream(..),
 ) where

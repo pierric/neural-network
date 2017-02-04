@@ -11,8 +11,6 @@
 --
 -- This module defines an general adapter component.
 ------------------------------------------------------------
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE DeriveDataTypeable #-}
 module Data.NeuralNetwork.Adapter (
   Adapter(..)
 ) where

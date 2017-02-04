@@ -1,4 +1,3 @@
-{-# LANGUAGE TypeFamilies, FlexibleContexts, BangPatterns #-}
 module Data.NeuralNetwork.Backend.BLASHS.SIMD where
 
 import Data.Vector.Storable.Mutable as MV

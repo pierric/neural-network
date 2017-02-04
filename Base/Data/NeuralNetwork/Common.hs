@@ -1,6 +1,16 @@
-{-# LANGUAGE MultiParamTypeClasses, FlexibleContexts, FlexibleInstances #-}
-{-# LANGUAGE TypeFamilies #-}
-
+------------------------------------------------------------
+-- |
+-- Module      :  Data.NeuralNetwork.Common
+-- Description :  Neural network in abstract
+-- Copyright   :  (c) 2016 Jiasen Wu
+-- License     :  BSD-style (see the file LICENSE)
+-- Maintainer  :  Jiasen Wu <jiasenwu@hotmail.com>
+-- Stability   :  experimental
+-- Portability :  portable
+--
+--
+-- This module defines common interfaces for backends
+------------------------------------------------------------
 module Data.NeuralNetwork.Common(
   LayerSize(..),
   HeadSize(..),

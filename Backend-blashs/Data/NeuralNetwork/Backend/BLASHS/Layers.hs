@@ -12,9 +12,7 @@
 -- This module supplies a high level abstraction of the rather
 -- low-level blas-hs interfaces.
 ------------------------------------------------------------
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE TypeFamilies, TypeOperators, FlexibleInstances, FlexibleContexts, GADTs #-}
-{-# LANGUAGE StandaloneDeriving, DeriveDataTypeable #-}
+{-# LANGUAGE StandaloneDeriving #-}
 module Data.NeuralNetwork.Backend.BLASHS.Layers(
   SinglVec, MultiMat, F, C, P, T, RunLayer(..),
   Reshape2DAs1D, as1D,

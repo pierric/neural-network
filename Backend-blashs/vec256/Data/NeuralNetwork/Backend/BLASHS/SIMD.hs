@@ -1,4 +1,3 @@
-{-# LANGUAGE TypeFamilies, FlexibleContexts, FlexibleInstances #-}
 {-# LANGUAGE UnboxedTuples, MagicHash #-}
 {-# LANGUAGE GHCForeignImportPrim, UnliftedFFITypes #-}
 module Data.NeuralNetwork.Backend.BLASHS.SIMD where

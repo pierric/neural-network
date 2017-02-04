@@ -12,7 +12,6 @@
 -- This module supplies a collection of calculations that
 -- could be implemented on top of SIMD.
 ------------------------------------------------------------
-{-# LANGUAGE TypeFamilies, FlexibleContexts, FlexibleInstances #-}
 {-# LANGUAGE UnboxedTuples, MagicHash #-}
 {-# LANGUAGE GHCForeignImportPrim, UnliftedFFITypes #-}
 module Data.NeuralNetwork.Backend.BLASHS.SIMD (

@@ -12,11 +12,7 @@
 -- This module defines an abstract interface for neural network
 -- and a protocol for its backends to follow.
 ------------------------------------------------------------
-{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE DeriveDataTypeable #-}
 module Data.NeuralNetwork (
   Component(..),
   learn,
