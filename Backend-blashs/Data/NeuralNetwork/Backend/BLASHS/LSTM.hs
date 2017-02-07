@@ -345,7 +345,7 @@ instance (Data a, Component a, Inp a ~ VecR, Run a ~ Run LSTM) => Component (Str
   forwardT (Stream c) xs = do
     -- set initial state for all LSTMs
     st <- forM (collectLSTMs c) (\lstm -> do
-            vec <- newDenseVector (size $ head xs)
+            vec <- newDenseVector (snd $ size (parm_w_f lstm))
             return (lstm_id lstm, Left vec))
     -- forward each input one by one, where the state is implicitly propagated.
     trs <- flip evalStateT (M.fromList st) (mapM (forwardT c) xs)
