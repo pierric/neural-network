@@ -31,7 +31,7 @@ data LayerSize = D1 Int | D2 Int Int Int | SV LayerSize | SF Int LayerSize
 class HeadSize l where
   hsize :: l -> LayerSize
 instance HeadSize SpecInStream where
-  hsize InStream = SV (D1 1)
+  hsize (InStream n) = SV (D1 n)
 instance HeadSize SpecIn1D where
   hsize (In1D n) = D1 n
 instance HeadSize SpecIn2D where

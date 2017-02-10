@@ -40,7 +40,7 @@ type LSTMident = Int
 data LSTM = LLSTM { parm_w_f :: MatR, parm_w_i :: MatR, parm_w_o :: MatR, parm_w_c :: MatR
                   , parm_u_f :: MatR, parm_u_i :: MatR, parm_u_o :: MatR
                   , parm_b_f :: VecR, parm_b_i :: VecR, parm_b_o :: VecR, parm_b_c :: VecR
-                  , lstm_id  :: LSTMident
+                  , lstm_id  :: LSTMident, lstm_isize, lstm_osize :: Int
                   }
   deriving Typeable
 
@@ -56,27 +56,27 @@ lstmDataType = mkDataType "Data.NeuralNetwork.Backend.BLASHS.LSTM.LSTM" [lstmCon
 global_LSTM_id_counter :: IORef Int
 global_LSTM_id_counter = unsafePerformIO (newIORef 0)
 -- | create a new LSTM component
-newLSTM :: Int        -- ^ number of input size
-        -> Int        -- ^ number of output size
+newLSTM :: Int        -- ^ input size
+        -> Int        -- ^ output size
         -> IO LSTM    -- ^ the new layer
 newLSTM m n =
   withSystemRandom . asGenIO $ \gen -> do
-    let newW = do raw <- newDenseVectorByGen (double2Float <$> normal 0 0.01 gen) (m*n)
-                  return $ v2m m n raw
-        newU = do raw <- newDenseVectorByGen (double2Float <$> normal 0 0.01 gen) (n*n)
-                  return $ v2m n n raw
-        newB = newDenseVectorConst n 1
-    parm_w_f <- newW
-    parm_w_i <- newW
-    parm_w_o <- newW
-    parm_w_c <- newW
-    parm_u_f <- newU
-    parm_u_i <- newU
-    parm_u_o <- newU
-    parm_b_f <- newB
-    parm_b_i <- newB
-    parm_b_o <- newB
-    parm_b_c <- newB
+    let newW v = do raw <- newDenseVectorByGen (double2Float <$> normal 0 v gen) (m*n)
+                    return $ v2m m n raw
+        newU v = do raw <- newDenseVectorByGen (double2Float <$> normal 0 v gen) (n*n)
+                    return $ v2m n n raw
+        newB v = newDenseVectorConst n v
+    parm_w_f <- newW 0.01
+    parm_w_i <- newW 0.01
+    parm_w_o <- newW 0.01
+    parm_w_c <- newW 0.01
+    parm_u_f <- newU 0.01
+    parm_u_i <- newU 0.01
+    parm_u_o <- newU 0.01
+    parm_b_f <- newB 1.0
+    parm_b_i <- newB 0
+    parm_b_o <- newB 0
+    parm_b_c <- newB 0
     lstm_id  <- readIORef global_LSTM_id_counter
     modifyIORef' global_LSTM_id_counter (+1)
     return $ LLSTM {
@@ -91,7 +91,9 @@ newLSTM m n =
       parm_b_i = parm_b_i,
       parm_b_o = parm_b_o,
       parm_b_c = parm_b_c,
-      lstm_id  = lstm_id
+      lstm_id  = lstm_id,
+      lstm_isize = m,
+      lstm_osize = n
     }
 
 -- state passed forward
@@ -116,7 +118,7 @@ instance Component LSTM where
   forwardT lstm x_t = do
     Just (Left c_tm1) <- gets (M.lookup $ lstm_id lstm)
 
-    let osize = snd $ size (parm_w_f lstm)
+    let osize = lstm_osize lstm
     mf_t  <- newDenseVector osize
     mf_t <<= x_t   :<# parm_w_f lstm
     mf_t <<+ c_tm1 :<# parm_u_f lstm
@@ -142,7 +144,7 @@ instance Component LSTM where
     n_t  <<= x_t :<# parm_w_c lstm
     n_t  <<= n_t :.+ parm_b_c lstm
 
-    c_t   <- newDenseVector (size c_tm1)
+    c_t   <- newDenseVector osize
     c_t  <<= c_tm1 :.* f_t
 
     tmp   <- newDenseVectorCopy n_t
@@ -167,6 +169,7 @@ instance Component LSTM where
 
   backward lstm trace !delta_out rate = do
     Just (Right upward) <- gets (M.lookup $ lstm_id lstm)
+
     delta_ct <- case upward of
                   NextNothing -> do
                     tmp <- newDenseVectorCopy (tr_c trace)
@@ -205,7 +208,7 @@ instance Component LSTM where
 
                     return tmp
 
-    delta_ft  <- newDenseVector (size delta_ct)
+    delta_ft  <- newDenseVector (lstm_osize lstm)
     delta_ft <<= tr_c' trace :.* delta_ct
 
     delta_it  <- newDenseVectorCopy (tr_n trace)
@@ -238,65 +241,65 @@ instance Component LSTM where
     tmp <<= Apply sigma'
     tmp <<= tmp :.* tr_i trace
     tmp <<= tmp :.* delta_ct
-    delta_wc <<+ tmp :## tr_inp trace
+    delta_wc <<+ tr_inp trace :## tmp
 
     delta_wf <- uncurry newDenseMatrix (size (parm_w_f lstm))
     denseVectorCopy tmp (tr_mf trace)
     tmp <<= Apply sigma'
     tmp <<= tmp :.* delta_ft
-    delta_wf <<+ tmp :## tr_inp trace
+    delta_wf <<+ tr_inp trace :## tmp
 
     delta_wi <- uncurry newDenseMatrix (size (parm_w_i lstm))
     denseVectorCopy tmp (tr_mi trace)
     tmp <<= Apply sigma'
     tmp <<= tmp :.* delta_it
-    delta_wi <<+ tmp :## tr_inp trace
+    delta_wi <<+ tr_inp trace :## tmp
 
     delta_wo <- uncurry newDenseMatrix (size (parm_w_o lstm))
     denseVectorCopy tmp (tr_mo trace)
     tmp <<= Apply sigma'
     tmp <<= tmp :.* delta_ot
-    delta_wo <<+ tmp :## tr_inp trace
+    delta_wo <<+ tr_inp trace :## tmp
 
     delta_uf <- uncurry newDenseMatrix (size (parm_u_f lstm))
     denseVectorCopy tmp (tr_mf trace)
     tmp <<= Apply sigma'
     tmp <<= tmp :.* delta_ft
-    delta_uf <<+ tmp :## tr_c' trace
+    delta_uf <<+ tr_c' trace :## tmp
 
     delta_ui <- uncurry newDenseMatrix (size (parm_u_i lstm))
     denseVectorCopy tmp (tr_mi trace)
     tmp <<= Apply sigma'
     tmp <<= tmp :.* delta_it
-    delta_ui <<+ tmp :## tr_c' trace
+    delta_ui <<+ tr_c' trace :## tmp
 
     delta_uo <- uncurry newDenseMatrix (size (parm_u_o lstm))
     denseVectorCopy tmp (tr_mo trace)
     tmp <<= Apply sigma'
     tmp <<= tmp :.* delta_ot
-    delta_uo <<+ tmp :## tr_c' trace
+    delta_uo <<+ tr_c' trace :## tmp
 
-    delta_inp <- newDenseVector (size delta_out)
+    delta_inp <- newDenseVector (lstm_isize lstm)
     tmp <- newDenseVectorCopy (tr_mf trace)
     tmp <<= Apply sigma'
-    tmp <<= parm_w_f lstm :#> tmp
-    delta_inp <<= tmp :.* delta_ft
+    tmp <<= tmp :.* delta_ft
+    delta_inp <<= parm_w_f lstm :#> tmp
 
     denseVectorCopy tmp (tr_mi trace)
     tmp <<= Apply sigma'
-    tmp <<= parm_w_i lstm :#> tmp
-    delta_inp <<+ tmp :.* delta_it
+    tmp <<= tmp :.* delta_it
+    delta_inp <<+ parm_w_i lstm :#> tmp
 
     denseVectorCopy tmp (tr_mo trace)
     tmp <<= Apply sigma'
-    tmp <<= parm_w_o lstm :#> tmp
-    delta_inp <<+ tmp :.* delta_ot
+    tmp <<= tmp :.* delta_ot
+    delta_inp <<+ parm_w_o lstm :#> tmp
 
     denseVectorCopy tmp (tr_n trace)
     tmp <<= Apply sigma'
     tmp <<= tmp :.* tr_i trace
-    tmp <<= parm_w_c lstm :#> tmp
-    delta_inp <<+ tmp :.* delta_ct
+    tmp <<= tmp :.* delta_ct
+    delta_inp <<+ parm_w_c lstm :#> tmp
 
     delta_bc <<= Scale rate
     parm_b_c lstm <<= parm_b_c lstm :.+ delta_bc
@@ -345,7 +348,7 @@ instance (Data a, Component a, Inp a ~ VecR, Run a ~ Run LSTM) => Component (Str
   forwardT (Stream c) xs = do
     -- set initial state for all LSTMs
     st <- forM (collectLSTMs c) (\lstm -> do
-            vec <- newDenseVector (snd $ size (parm_w_f lstm))
+            vec <- newDenseVector (lstm_osize lstm)
             return (lstm_id lstm, Left vec))
     -- forward each input one by one, where the state is implicitly propagated.
     trs <- flip evalStateT (M.fromList st) (mapM (forwardT c) xs)

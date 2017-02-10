@@ -112,7 +112,7 @@ data SpecIn1D          = In1D Int     -- ^ dimension of input
 data SpecIn2D          = In2D Int Int -- ^ dimension of input
   deriving (Typeable, Data)
 
-data SpecInStream      = InStream
+data SpecInStream      = InStream Int
   deriving (Typeable, Data)
 
 -- | Specification: full connection layer

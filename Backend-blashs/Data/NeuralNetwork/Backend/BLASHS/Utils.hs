@@ -35,7 +35,9 @@ module Data.NeuralNetwork.Backend.BLASHS.Utils (
   v2m, m2v, v2ma, ma2v,
   Op(..), AssignTo(..),
   sumElements, corr2, conv2, pool, unpool, transpose,
-  prettyDenseVectorFloat
+  prettyDenseVectorFloat,
+  unsafeReadV, unsafeWriteV,
+  unsafeReadM, unsafeWriteM,
 ) where
 
 import Blas.Generic.Unsafe
