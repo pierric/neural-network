@@ -5,17 +5,9 @@
 {-# LANGUAGE UndecidableInstances #-}
 module Main where
 
-import qualified Data.Text as Text
-import qualified Data.Text.Encoding as Text
-import qualified Data.ByteString as BS
 import qualified Data.Vector as BV
-import qualified Data.Vector.Storable as SV
 import Control.Monad.Except
-import Data.Hashable
 import Data.Data
-import qualified NLP.Tokenize.Text as Token
-import System.FilePath
-import System.Directory
 import System.IO (hFlush, stdout)
 import Data.IORef
 import Data.List (partition)
@@ -25,43 +17,14 @@ import Data.NeuralNetwork hiding (cost')
 import Data.NeuralNetwork.Common
 import Data.NeuralNetwork.Adapter
 import Data.NeuralNetwork.Backend.BLASHS
+import Corpus
 
-type Sentence = [DenseVector Float]
-type Sentiment = DenseVector Float
-
-load_imdb_train = do
-  let path = "tdata" </> "aclImdb" </> "train" </> "pos"
-  files <- take 1200 <$> listDirectory path
-  tr_pos <- mapM (load_entry path) files
-  let path = "tdata" </> "aclImdb" </> "train" </> "neg"
-  files <- take 1200 <$> listDirectory path
-  tr_neg <- mapM (load_entry path) files
-  return $ tr_pos ++ tr_neg
-
-load_imdb_test = do
-  let path = "tdata" </> "aclImdb" </> "test" </> "pos"
-  files <- take 10 <$> listDirectory path
-  tr_pos <- mapM (load_entry path) files
-  let path = "tdata" </> "aclImdb" </> "test" </> "neg"
-  files <- take 10 <$> listDirectory path
-  tr_neg <- mapM (load_entry path) files
-  return $ tr_pos ++ tr_neg
-
-load_entry :: FilePath -> FilePath -> IO (Sentence, Sentiment)
-load_entry path file = do
-  content <- BS.readFile (path </> file)
-  let toks = Token.tokenize (Text.decodeUtf8 content)
-      eval = let (_, '_':m) = break (=='_') file
-                 (n, _) = break (=='.') m
-             in read n - 1 :: Int
-  toks' <- mapM (newDenseVectorConst 1 . (/16777216.0) . fromIntegral . hash) toks
-  eval' <- DenseVector <$> (SV.unsafeThaw $ SV.fromList (replicate eval 0 ++ [1] ++ replicate (9-eval) 0))
-  return (toks', eval')
-
-main = do let cc = InStream :++ -- Debug "i0" :++
-                   Flow (LSTM 1) :++ -- Debug "i1" :++
-                   Cutoff 120 :++ Concat :++
-                   FullConnect 200 :++ FullConnect 10
+main = do putStrLn "Start."
+          (nv, trdata, tsdata) <- corpus 200
+          let cc = InStream nv :++ -- Debug "i0" :++
+                   Flow (LSTM 128) :++ -- Debug "i1" :++
+                   Cutoff 80 :++ Concat :++
+                   FullConnect 400 :++ FullConnect 10
                     --  :: SpecInString :++ SpecFlow SpecLSTM :++ SpecCutoff :++ SpecConcat :++ SpecFullConnect :++ SpecFullConnect
               mc = compile ByBLASHS cc
                     --  :: Env ByBLASHS
@@ -76,10 +39,8 @@ main = do let cc = InStream :++ -- Debug "i0" :++
           case x of
             Left _   -> putStrLn "Error."
             Right nn -> do
-              putStrLn "OK."
-              trdata <- load_imdb_train
-              tsdata <- load_imdb_test
-              loop nn trdata (take 10 trdata) 1
+              putStrLn "Loaded."
+              loop nn (BV.take 2 trdata) (BV.take 2 trdata) 1
               -- o <- forward nn i
               -- putStrLn $ showPretty $ text "#" <+> prettyDenseVectorFloat o
               -- nn <- learn diff rate nn tr0
@@ -95,25 +56,25 @@ main = do let cc = InStream :++ -- Debug "i0" :++
 
 
 dotrain :: (Component n, Inp n ~ Sentence, Out n ~ Sentiment, Run n ~ IO)
-        => n -> [(Inp n, Out n)] -> Int -> IO n
+        => n -> BV.Vector (Inp n, Out n) -> Int -> IO n
 dotrain nn dataset mcnt = do
   cnt <- newIORef 0 :: IO (IORef Int)
   let dispAndInc = do
         i <- readIORef cnt
         writeIORef cnt (i+1)
         putStrLn ("Iteration " ++ show i)
-  iterateM mcnt nn ((dispAndInc >>) . online 0.000001 dataset)
+  iterateM mcnt nn ((dispAndInc >>) . online 0.0001 dataset)
 
 dotest :: (Component n, Inp n ~ Sentence, Out n ~ Sentiment, Run n ~ IO)
-       => n -> [(Inp n, Out n)] -> IO ()
+       => n -> BV.Vector (Inp n, Out n) -> IO ()
 dotest nn dataset = do
     putStrLn "Start test"
-    result <- mapM ((>>= postprocess) . forward nn . fst) dataset
-    expect <- mapM (postprocess . snd) dataset
-    let (co,wr) = partition (uncurry (==)) $ zip result expect
-    putStrLn $ printf "correct: %d, wrong: %d" (length co) (length wr)
+    result <- BV.mapM ((>>= postprocess) . forward nn . fst) dataset
+    expect <- BV.mapM (postprocess . snd) dataset
+    let (co,wr) = BV.partition (uncurry (==)) $ BV.zip result expect
+    putStrLn $ printf "correct: %d, wrong: %d" (BV.length co) (BV.length wr)
     putStrLn $ "First 10 tests:"
-    flip mapM_ (take 10 dataset) $ \(ds,ev) -> do
+    BV.forM_ (BV.take 10 dataset) $ \(ds,ev) -> do
       pv <- forward nn ds
       putStrLn $ showPretty $ text "+" <+> prettyDenseVectorFloat pv
       putStrLn $ showPretty $ text "*" <+> prettyDenseVectorFloat ev
@@ -124,8 +85,8 @@ dotest nn dataset = do
       return $ BV.maxIndex a
 
 online :: (Component n, Inp n ~ Sentence, Out n ~ Sentiment, Run n ~ IO)
-       => Float -> [(Inp n, Out n)] -> n -> IO n
-online rate ds nn = walk ds nn
+       => Float -> BV.Vector (Inp n, Out n) -> n -> IO n
+online rate ds nn = walk (BV.toList ds) nn
   where
     walk []     nn = return nn
     walk (d:ds) nn = do nn <- learn outcost' rate nn d
