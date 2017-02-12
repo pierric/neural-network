@@ -20,8 +20,8 @@ import Data.NeuralNetwork.Backend.BLASHS
 import Corpus
 
 main = do putStrLn "Start."
-          (nv, trdata, tsdata) <- corpus 200
-          let cc = InStream nv :++ -- Debug "i0" :++
+          (nv, trdata, tsdata) <- corpus 1000
+          let cc = InStream 1 :++ Embedding nv :++ -- Debug "i0" :++
                    Flow (LSTM 128) :++ -- Debug "i1" :++
                    Cutoff 80 :++ Concat :++
                    FullConnect 400 :++ FullConnect 10
@@ -40,7 +40,7 @@ main = do putStrLn "Start."
             Left _   -> putStrLn "Error."
             Right nn -> do
               putStrLn "Loaded."
-              loop nn (BV.take 2 trdata) (BV.take 2 trdata) 1
+              loop nn (BV.take 200 trdata) (BV.take 20 trdata) 1
               -- o <- forward nn i
               -- putStrLn $ showPretty $ text "#" <+> prettyDenseVectorFloat o
               -- nn <- learn diff rate nn tr0
@@ -145,6 +145,24 @@ instance MonadError ErrCode m => TranslateBody m SpecConcat where
       back (m,n) odelta = do let videlta = denseVectorSplit m n odelta
                              return $ BV.toList videlta
   trans _ _ = throwError ErrMismatch
+
+data SpecEmbedding = Embedding Int deriving (Typeable, Data)
+type Embedding = Adapter IO [Int] [DenseVector Float] ()
+
+instance BodySize SpecEmbedding where
+  bsize (SV (D1 1)) (Embedding n)= SV (D1 n)
+
+instance MonadError ErrCode m => TranslateBody m SpecEmbedding where
+  type SpecToCom SpecEmbedding = Embedding
+  trans (SV (D1 s)) (Embedding n) = return $ Adapter to back
+    where
+      to inp = do v <- mapM (newDenseVectorDelta n) inp
+                  return ((), v)
+      back () odelta = return $ repeat 0
+      newDenseVectorDelta n i = do
+        v <- newDenseVector n
+        unsafeWriteV v i 1
+        return v
 
 instance Pretty (DenseVector Float) where
   pretty = prettyDenseVectorFloat

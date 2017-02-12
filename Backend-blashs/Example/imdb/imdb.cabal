@@ -12,7 +12,7 @@ cabal-version:       >=1.10
 
 executable imdb
   main-is:             Main.hs
-  other-modules:       Corpus
+  other-modules:       Corpus, Token
   build-depends:       base >= 4.7 && < 5, neural-network-base,
                        constraints, vector, mtl, filepath, directory,
                        bytestring, text, tokenize, containers,
