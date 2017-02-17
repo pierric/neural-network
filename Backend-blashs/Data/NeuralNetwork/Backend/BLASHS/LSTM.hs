@@ -221,7 +221,7 @@ instance Component LSTM where
 
     delta_bc  <- newDenseVectorCopy (tr_n trace)
     delta_bc <<= Apply sigma'
-    delta_bc <<= delta_bc :.* tr_inp trace
+    delta_bc <<= delta_bc :.* tr_i trace
     delta_bc <<= delta_bc :.* delta_ct
 
     delta_bf  <- newDenseVectorCopy (tr_mf trace)
@@ -318,7 +318,7 @@ instance Component LSTM where
     delta_wo <<= Scale rate
     parm_w_o lstm <<= parm_w_o lstm :.+ delta_wo
     delta_uf <<= Scale rate
-    parm_u_f  lstm<<= parm_u_f lstm :.+ delta_uf
+    parm_u_f lstm <<= parm_u_f lstm :.+ delta_uf
     delta_ui <<= Scale rate
     parm_u_i lstm <<= parm_u_i lstm :.+ delta_ui
     delta_uo <<= Scale rate
