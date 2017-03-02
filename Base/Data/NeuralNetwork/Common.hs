@@ -11,6 +11,7 @@
 --
 -- This module defines common interfaces for backends
 ------------------------------------------------------------
+{-# LANGUAGE TypeOperators #-}
 module Data.NeuralNetwork.Common(
   LayerSize(..),
   HeadSize(..),
@@ -53,6 +54,8 @@ instance BodySize SpecLSTM where
 instance BodySize a => BodySize (SpecFlow a) where
   bsize (SV sz) (Flow a) = SV (bsize sz a)
   bsize (SF n sz) (Flow a) = SF n (bsize sz a)
+instance (BodySize a, BodySize b) => BodySize (a :++ b) where
+  bsize s (a :++ b)= bsize (bsize s a) b
 
 -- translate the body of specification
 class MonadError ErrCode m => TranslateBody m s where
