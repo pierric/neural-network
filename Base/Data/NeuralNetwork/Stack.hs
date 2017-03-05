@@ -15,13 +15,17 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE DataKinds #-}
 module Data.NeuralNetwork.Stack (
   Stack(..),
-  CE, CL, CR, LiftRun
+  CE, CL, CR, LiftRun,
 ) where
 
 import Data.Data
+import Data.HVect
+import GHC.TypeLits
 import Control.Monad.Trans
+import Control.Monad.Except (MonadError)
 import Data.NeuralNetwork
 import Data.NeuralNetwork.Common
 
@@ -102,9 +106,23 @@ instance (Component a, Component b,
     (a', !idelta) <- lift $ backward a tra odelta rate
     return (Stack a' b', idelta)
 
-instance (Monad m, TranslateBody m a, TranslateBody m c, BodySize a) => TranslateBody m (a :++ c) where
-  -- ':++' is translated to the stacking component.
-  type SpecToCom (a :++ b) = Stack (SpecToCom a) (SpecToCom b) (LiftRun (Run (SpecToCom a)) (Run (SpecToCom b)))
-  trans s (a :++ c) = do u <- trans s a
-                         v <- trans (bsize s a) c
-                         return $ Stack u v
+class Stackable m a b where
+  type HVecSpecToCom a b
+  hvecTrans :: LayerSize -> HVect (a ': b) -> m (HVecSpecToCom a b)
+
+instance BodyTrans m a => Stackable m a '[] where
+  type HVecSpecToCom a '[] = SpecToCom a
+  hvecTrans sz (a :&: HNil) = trans sz a
+
+instance (BodyTrans m a, BodySize a, Stackable m b c) => Stackable m a (b ': c) where
+  type HVecSpecToCom a (b ': c) = Stack (SpecToCom a) (HVecSpecToCom b c) (LiftRun (Run (SpecToCom a)) (Run (HVecSpecToCom b c)))
+  hvecTrans sz (a :&: bc) = do c0 <- trans sz a
+                               cs <- hvecTrans (bsize sz a) bc
+                               return (Stack c0 cs)
+
+instance (MonadError ErrCode m, Stackable m s0 ss) => BodyTrans m (HVect (s0 ': ss)) where
+  type SpecToCom (HVect (s0 ': ss)) = HVecSpecToCom s0 ss
+  trans sz spec = hvecTrans sz spec
+
+instance MonadError ErrCode m => BodyTrans m (HVect '[]) where
+  type SpecToCom (HVect '[]) = TypeError (Text "HVect '[] is not a valid specification of Neural Network")

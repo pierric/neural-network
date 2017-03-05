@@ -15,12 +15,10 @@
 {-# LANGUAGE TypeOperators #-}
 module Data.NeuralNetwork (
   Component(..),
+  Evaluator(..),
   learn,
-  relu, relu',
-  cost',
   Backend(..),
   RunInEnv(..),
-  (:++)(..),
   SpecIn1D(..),
   SpecIn2D(..),
   SpecInStream(..),
@@ -31,6 +29,8 @@ module Data.NeuralNetwork (
   SpecLSTM(..),
   SpecFlow(..),
   SpecMeanPooling(..),
+  SpecEvaluator(..),
+  Model,
 ) where
 
 import Data.Data
@@ -56,29 +56,23 @@ class Component a where
   -- | Backward propagation
   backward :: a -> Trace a -> Out a -> Float -> Run a (a, Inp a)
 
+class Monad m => Evaluator m a where
+  type Val a
+  eval :: a -> Val a -> m (Val a)
+  cost :: a -> Val a -> Val a -> m (Val a)
+
 -- | By giving a way to measure the error, 'learn' can update the
 -- neural network component.
-learn :: (Component n, Monad (Run n))
-    => (Out n -> Out n -> Run n (Out n))  -- ^ derivative of the error function
+learn :: (Component n, Monad (Run n), Evaluator (Run n) e, Out n ~ Val e)
+    => (n, e)                             -- ^ neuron network
+    -> (Inp n, Val e)                     -- ^ input and expect output
     -> Float                              -- ^ learning rate
-    -> n                                  -- ^ neuron network
-    -> (Inp n, Out n)                     -- ^ input and expect output
     -> Run n n                            -- ^ updated network
-learn cost rate n (i,o) = do
+learn (n,e) (i,o) rate = do
     tr <- forwardT n i
-    er <- cost (output tr) o
+    o' <- eval e (output tr)
+    er <- cost e o' o
     fst <$> backward n tr er rate
-
--- | default RELU and derivative of RELU
-relu, relu' :: (Num a, Ord a) => a -> a
-relu = max 0
-relu' x | x < 0     = 0
-        | otherwise = 1
-
--- | default derivative of error measurement
-cost' :: (Num a, Ord a) => a -> a -> a
-cost' a y | y == 1 && a >= y = 0
-          | otherwise        = a - y
 
 {--
 We can improve the predefined specifications by a feature like
@@ -141,10 +135,12 @@ data SpecLSTM = LSTM Int
 data SpecFlow a = Flow a
   deriving (Typeable, Data)
 
--- | Specification: stacking layer
-infixr 0 :++
-data a :++ b = a :++ b
-  deriving (Typeable, Data)
+data SpecEvaluator = MeanSquaredError | SoftmaxCrossEntropy
+
+type family Model a where
+  Model (a,b) = (Component a, Monad (Run a), Evaluator (Run a) b, Out a ~ Val b)
+type family ModelRunInEnv m e where
+  ModelRunInEnv (a,b) e = RunInEnv (Run a) e
 
 -- | Abstraction of backend to carry out the specification
 class Backend b s where
@@ -154,9 +150,8 @@ class Backend b s where
   type ConvertFromSpec b s :: *
   -- | necessary constraints of the resulting type
   witness :: b -> s -> Dict ( Monad (Env b)
-                            , Monad (Run (ConvertFromSpec b s))
-                            , Component (ConvertFromSpec b s)
-                            , RunInEnv (Run (ConvertFromSpec b s)) (Env b))
+                            , Model (ConvertFromSpec b s)
+                            , ModelRunInEnv (ConvertFromSpec b s) (Env b))
   -- | compile the specification to runnable component.
   compile :: b -> s -> Env b (ConvertFromSpec b s)
 

@@ -11,15 +11,16 @@
 --
 -- This module defines common interfaces for backends
 ------------------------------------------------------------
+{-# LANGUAGE DataKinds, TypeOperators #-}
 module Data.NeuralNetwork.Common(
   LayerSize(..),
-  HeadSize(..),
-  BodySize(..),
-  TranslateBody(..),
+  InputLayer(..),
+  BodySize(..), BodyTrans(..), EvalTrans(..),
   ErrCode(..),
 ) where
 
 import Control.Monad.Except (MonadError)
+import Data.HVect
 import Data.NeuralNetwork
 
 -- It is necessary to propagate the size along the layers,
@@ -28,14 +29,14 @@ import Data.NeuralNetwork
 data LayerSize = D1 Int | D2 Int Int Int | SV LayerSize | SF Int LayerSize
 
 -- 'HeadSize' is class for the input layer
-class HeadSize l where
-  hsize :: l -> LayerSize
-instance HeadSize SpecInStream where
-  hsize (InStream n) = SV (D1 n)
-instance HeadSize SpecIn1D where
-  hsize (In1D n) = D1 n
-instance HeadSize SpecIn2D where
-  hsize (In2D m n) = D2 1 m n
+class InputLayer i where
+  isize :: i -> LayerSize
+instance InputLayer SpecInStream where
+  isize (InStream n) = SV (D1 n)
+instance InputLayer SpecIn1D where
+  isize (In1D n) = D1 n
+instance InputLayer SpecIn2D where
+  isize (In2D m n) = D2 1 m n
 
 -- 'BodySize' is class for the actual computational layers
 class BodySize l where
@@ -55,8 +56,12 @@ instance BodySize a => BodySize (SpecFlow a) where
   bsize (SF n sz) (Flow a) = SF n (bsize sz a)
 
 -- translate the body of specification
-class MonadError ErrCode m => TranslateBody m s where
+class MonadError ErrCode m => BodyTrans m s where
   type SpecToCom s
   trans :: LayerSize -> s -> m (SpecToCom s)
+
+class (MonadError ErrCode m, Component c) => EvalTrans m c e where
+  type SpecToEvl c e
+  etrans :: c -> e -> m (SpecToEvl c e)
 
 data ErrCode = ErrMismatch
