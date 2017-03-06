@@ -1,4 +1,3 @@
-{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE MultiParamTypeClasses, FlexibleContexts, FlexibleInstances #-}
@@ -14,8 +13,7 @@ import Data.List (partition)
 import Text.Printf (printf)
 import Data.HVect (HVect(..))
 import Text.PrettyPrint.Free hiding ((</>))
-import Data.NeuralNetwork hiding (cost')
-import Data.NeuralNetwork.Common
+import Data.NeuralNetwork
 import Data.NeuralNetwork.Adapter
 import Data.NeuralNetwork.Backend.BLASHS
 import Corpus
@@ -39,8 +37,7 @@ main = do putStrLn "Start."
        let next = (reads :: ReadS Int) str
        when (not $ null next) (loop nn trd tsd (fst $ head next))
 
-
-dotrain :: (Model (n,e), Component n, Inp n ~ Sentence, Out n ~ Sentiment, Run n ~ IO)
+dotrain :: (ModelCst n e, Run n ~ IO, Inp n ~ Sentence, Val e ~ Sentiment)
         => (n, e) -> BV.Vector (Inp n, Out n) -> Int -> IO (n,e)
 dotrain nn dataset mcnt = do
   cnt <- newIORef 0 :: IO (IORef Int)
@@ -50,7 +47,7 @@ dotrain nn dataset mcnt = do
         putStrLn ("Iteration " ++ show i)
   iterateM mcnt nn ((dispAndInc >>) . online 0.0001 dataset)
 
-dotest :: (Model (n,e), Component n, Inp n ~ Sentence, Out n ~ Sentiment, Run n ~ IO)
+dotest :: (ModelCst n e, Run n ~ IO, Inp n ~ Sentence, Val e ~ Sentiment)
        => (n, e) -> BV.Vector (Inp n, Out n) -> IO ()
 dotest (nn,_) dataset = do
     putStrLn "Start test"
@@ -69,7 +66,7 @@ dotest (nn,_) dataset = do
       a <- denseVectorToVector v
       return $ BV.maxIndex a
 
-online :: (Model (n,e), Inp n ~ Sentence, Out n ~ Sentiment, Run n ~ IO)
+online :: (ModelCst n e, Run n ~ IO, Inp n ~ Sentence, Val e ~ Sentiment)
        => Float -> BV.Vector (Inp n, Out n) -> (n, e) -> IO (n, e)
 online rate ds (n, e) = walk (BV.toList ds) n
   where
@@ -96,7 +93,7 @@ instance BodySize SpecCutoff where
 instance MonadError ErrCode m => BodyTrans m SpecCutoff where
   --
   type SpecToCom SpecCutoff = Cutoff
-  trans (SV (D1 s)) (Cutoff n) = return $ cutoff n
+  btrans (SV (D1 s)) (Cutoff n) = return $ cutoff n
     where
       cutoff :: Num a => Int -> Cutoff
       cutoff n = Adapter to back
@@ -107,7 +104,7 @@ instance MonadError ErrCode m => BodyTrans m SpecCutoff where
       back r odelta = do
         z <- replicateM (r-n) (newDenseVector s)
         return $ take r (odelta ++ z)
-  trans _ _ = throwError ErrMismatch
+  btrans _ _ = throwError ErrMismatch
 
 data SpecConcat = Concat deriving (Typeable, Data)
 type Concat = Adapter IO [DenseVector Float] (DenseVector Float) (Int, Int)
@@ -117,7 +114,7 @@ instance BodySize SpecConcat where
 
 instance MonadError ErrCode m => BodyTrans m SpecConcat where
   type SpecToCom SpecConcat = Concat
-  trans (SF m (D1 n)) Concat = return nconcat
+  btrans (SF m (D1 n)) Concat = return nconcat
     where
       nconcat :: Concat
       nconcat = Adapter to back
@@ -126,7 +123,7 @@ instance MonadError ErrCode m => BodyTrans m SpecConcat where
                   return ((BV.length vinp, size (BV.head vinp)), cv)
       back (m,n) odelta = do let videlta = denseVectorSplit m n odelta
                              return $ BV.toList videlta
-  trans _ _ = throwError ErrMismatch
+  btrans _ _ = throwError ErrMismatch
 
 data SpecEmbedding = Embedding Int deriving (Typeable, Data)
 type Embedding = Adapter IO [Int] [DenseVector Float] ()
@@ -136,7 +133,7 @@ instance BodySize SpecEmbedding where
 
 instance MonadError ErrCode m => BodyTrans m SpecEmbedding where
   type SpecToCom SpecEmbedding = Embedding
-  trans (SV (D1 s)) (Embedding n) = return $ Adapter to back
+  btrans (SV (D1 s)) (Embedding n) = return $ Adapter to back
     where
       to inp = do v <- mapM (newDenseVectorDelta n) inp
                   return ((), v)

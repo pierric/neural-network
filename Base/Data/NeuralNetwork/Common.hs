@@ -17,18 +17,29 @@ module Data.NeuralNetwork.Common(
   InputLayer(..),
   BodySize(..), BodyTrans(..), EvalTrans(..),
   ErrCode(..),
+  SpecIn1D(..),
+  SpecIn2D(..),
+  SpecInStream(..),
+  SpecReshape2DAs1D(..),
+  SpecFullConnect(..),
+  SpecConvolution(..),
+  SpecMaxPooling(..),
+  SpecLSTM(..),
+  SpecFlow(..),
+  SpecMeanPooling(..),
+  SpecEvaluator(..),
 ) where
 
 import Control.Monad.Except (MonadError)
+import Data.Data
 import Data.HVect
-import Data.NeuralNetwork
 
 -- It is necessary to propagate the size along the layers,
 -- because fullconnect and convolution need to know
 -- the previous size.
 data LayerSize = D1 Int | D2 Int Int Int | SV LayerSize | SF Int LayerSize
 
--- 'HeadSize' is class for the input layer
+-- 'InputLayer' is class for the input layer
 class InputLayer i where
   isize :: i -> LayerSize
 instance InputLayer SpecInStream where
@@ -58,10 +69,73 @@ instance BodySize a => BodySize (SpecFlow a) where
 -- translate the body of specification
 class MonadError ErrCode m => BodyTrans m s where
   type SpecToCom s
-  trans :: LayerSize -> s -> m (SpecToCom s)
+  btrans :: LayerSize -> s -> m (SpecToCom s)
 
-class (MonadError ErrCode m, Component c) => EvalTrans m c e where
+class (MonadError ErrCode m) => EvalTrans m c e where
   type SpecToEvl c e
   etrans :: c -> e -> m (SpecToEvl c e)
 
 data ErrCode = ErrMismatch
+
+{--
+We can improve the predefined specifications by a feature like
+"open Kinds", when it is ready:
+https://ghc.haskell.org/trac/ghc/wiki/GhcKinds/KindsWithoutData
+
+data kind open SpecKind
+data kind member SpecIn1D :: SpecKind
+data kind member SpecFlow :: SpecKind -> SpecKind
+...
+
+data family Specification :: SpecKind -> *
+data instance Specification SpecIn1D = In1D Int
+data instance Specification (SpecFlow a) = Flow (Specification a)
+...
+
+class Backend b (Specification s) where
+  type Env b :: * -> *
+  type ConvertFromSpec b s :: *
+  compile :: b -> Specification s -> Env b (ConvertFromSpec b s)
+
+The Major benefit would be that compiler could tell more if there
+is an error when inferring the compiled neural network type.
+--}
+
+-- | Specification: 1D input
+data SpecIn1D          = In1D Int     -- ^ dimension of input
+  deriving (Typeable, Data)
+
+-- | Specification: 2D input
+data SpecIn2D          = In2D Int Int -- ^ dimension of input
+  deriving (Typeable, Data)
+
+data SpecInStream      = InStream Int
+  deriving (Typeable, Data)
+
+-- | Specification: full connection layer
+data SpecFullConnect   = FullConnect Int  -- ^ number of neurals
+  deriving (Typeable, Data)
+
+-- | Specification: convolution layer
+data SpecConvolution   = Convolution Int Int Int -- ^ number of output channels, size of kernel, size of padding
+  deriving (Typeable, Data)
+
+-- | Specification: max pooling layer
+data SpecMaxPooling    = MaxPooling  Int
+  deriving (Typeable, Data)
+
+-- | Specification: max pooling layer
+data SpecMeanPooling   = MeanPooling  Int
+  deriving (Typeable, Data)
+
+-- | Specification: reshaping layer
+data SpecReshape2DAs1D = Reshape2DAs1D
+  deriving (Typeable, Data)
+
+data SpecLSTM = LSTM Int
+  deriving (Typeable, Data)
+
+data SpecFlow a = Flow a
+  deriving (Typeable, Data)
+
+data SpecEvaluator = MeanSquaredError | SoftmaxCrossEntropy

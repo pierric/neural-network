@@ -106,23 +106,24 @@ instance (Component a, Component b,
     (a', !idelta) <- lift $ backward a tra odelta rate
     return (Stack a' b', idelta)
 
-class Stackable m a b where
-  type HVecSpecToCom a b
-  hvecTrans :: LayerSize -> HVect (a ': b) -> m (HVecSpecToCom a b)
+-- internal type class to do induction on a non-empty hvect
+class HVectStackable m a b where
+  type HVectSpecToCom a b
+  hvectTrans :: LayerSize -> HVect (a ': b) -> m (HVectSpecToCom a b)
 
-instance BodyTrans m a => Stackable m a '[] where
-  type HVecSpecToCom a '[] = SpecToCom a
-  hvecTrans sz (a :&: HNil) = trans sz a
+instance BodyTrans m a => HVectStackable m a '[] where
+  type HVectSpecToCom a '[] = SpecToCom a
+  hvectTrans sz (a :&: HNil) = btrans sz a
 
-instance (BodyTrans m a, BodySize a, Stackable m b c) => Stackable m a (b ': c) where
-  type HVecSpecToCom a (b ': c) = Stack (SpecToCom a) (HVecSpecToCom b c) (LiftRun (Run (SpecToCom a)) (Run (HVecSpecToCom b c)))
-  hvecTrans sz (a :&: bc) = do c0 <- trans sz a
-                               cs <- hvecTrans (bsize sz a) bc
-                               return (Stack c0 cs)
+instance (BodyTrans m a, BodySize a, HVectStackable m b c) => HVectStackable m a (b ': c) where
+  type HVectSpecToCom a (b ': c) = Stack (SpecToCom a) (HVectSpecToCom b c) (LiftRun (Run (SpecToCom a)) (Run (HVectSpecToCom b c)))
+  hvectTrans sz (a :&: bc) = do c0 <- btrans sz a
+                                cs <- hvectTrans (bsize sz a) bc
+                                return (Stack c0 cs)
 
-instance (MonadError ErrCode m, Stackable m s0 ss) => BodyTrans m (HVect (s0 ': ss)) where
-  type SpecToCom (HVect (s0 ': ss)) = HVecSpecToCom s0 ss
-  trans sz spec = hvecTrans sz spec
+instance (MonadError ErrCode m, HVectStackable m s0 ss) => BodyTrans m (HVect (s0 ': ss)) where
+  type SpecToCom (HVect (s0 ': ss)) = HVectSpecToCom s0 ss
+  btrans sz spec = hvectTrans sz spec
 
 instance MonadError ErrCode m => BodyTrans m (HVect '[]) where
   type SpecToCom (HVect '[]) = TypeError (Text "HVect '[] is not a valid specification of Neural Network")
