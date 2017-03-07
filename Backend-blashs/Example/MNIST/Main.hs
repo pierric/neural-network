@@ -14,14 +14,16 @@ import System.Environment
 import Text.PrettyPrint.Free hiding (flatten)
 import System.IO (hFlush, stdout)
 import System.IO.Unsafe
+import Data.HVect (HVect(..))
 import Parser
 
-main = do x <- runExceptT $ compile ByBLASHS ((In2D 28 28) :++
-                                              Convolution 12 7 3 :++ MaxPooling 2 :++
-                                              Convolution 24 5 2 :++ MaxPooling 2 :++
-                                              Reshape2DAs1D :++
-                                              FullConnect 512 :++ FullConnect 32 :++
-                                              FullConnect 10)
+main = do x <- runExceptT $ compile ByBLASHS (In2D 28 28,
+                                              Convolution 2 7 3 :&: MaxPooling 2 :&:
+                                              Convolution 4 5 2 :&: MaxPooling 2 :&:
+                                              Reshape2DAs1D :&:
+                                              FullConnect 512 :&: FullConnect 32 :&:
+                                              FullConnect 10 :&: HNil,
+                                              MeanSquaredError)
           case x of
             Left _ -> putStrLn "Error."
             Right cnn -> do
@@ -37,8 +39,8 @@ main = do x <- runExceptT $ compile ByBLASHS ((In2D 28 28) :++
       let next = (reads :: ReadS Int) str
       when (not $ null next) (loop cnn (fst $ head next))
 
-debug :: (Component n, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
-      => n -> IO ()
+debug :: (ModelCst n e, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
+      => (n,e) -> IO ()
 debug nn = do
   a0:a1:_ <- getArgs
   let cycle = read a0 :: Int
@@ -61,14 +63,14 @@ debug nn = do
   smalltest testset nn
   where
     checkpoint = 2
-    smalltest it nn = do
+    smalltest it (nn,_) = do
       flip mapM_ it $ \(ds,ev) -> do
         pv <- forward nn ds
         prettyResult pv >>= putStrLn . ("+" ++ )
         prettyResult ev >>= putStrLn . ("*" ++ )
 
-dotrain :: (Component n, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
-        => n -> Int -> IO n
+dotrain :: (ModelCst n e, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
+        => (n,e)-> Int -> IO (n,e)
 dotrain nn mcnt = do
   putStrLn "Load training data."
   dataset <- trainingData >>= mapM preprocess . uncurry zip
@@ -81,9 +83,9 @@ dotrain nn mcnt = do
         putStrLn ("Iteration " ++ show i)
   iterateM mcnt nn ((dispAndInc >>) . online 0.001 dataset)
 
-dotest :: (Component n, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
-       => n -> IO ()
-dotest !nn = do
+dotest :: (ModelCst n e, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
+       => (n,e) -> IO ()
+dotest !(nn,_) = do
     testset <- testData >>= mapM preprocess . uncurry zip
     putStrLn "Start test"
     result <- mapM ((>>= postprocess) . forward nn . fst) testset
@@ -96,16 +98,13 @@ dotest !nn = do
       prettyResult pv >>= putStrLn . ("+" ++ )
       prettyResult ev >>= putStrLn . ("*" ++ )
 
-online :: (Component n, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
-       => Float -> [(Inp n, Out n)] -> n -> IO n
+online :: (ModelCst n e, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
+       => Float -> [(Inp n, Out n)] -> (n,e) -> IO (n,e)
 online rate ds !nn = walk ds nn
   where
     walk []     !nn = return nn
-    walk (d:ds) !nn = do !nn <- learn outcost' rate nn d
+    walk (d:ds) !nn = do !nn <- learn nn d rate
                          walk ds nn
-    outcost' a b = do v <- newDenseVector (size a)
-                      v <<= ZipWith cost' a b
-                      return v
 
 iterateM :: (MonadIO m) => Int -> a -> (a -> m a) -> m a
 iterateM n x f = go 0 x

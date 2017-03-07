@@ -60,12 +60,13 @@ learn :: (ModelCst n e)
       => (n,e)                              -- ^ neuron network
       -> (Inp n, Val e)                     -- ^ input and expect output
       -> Float                              -- ^ learning rate
-      -> Run n n                            -- ^ updated network
+      -> Run n (n,e)                        -- ^ updated network
 learn (n,e) (i,o) rate = do
     tr <- forwardT n i
     o' <- eval e (output tr)
     er <- cost e o' o
-    fst <$> backward n tr er rate
+    n' <- fst <$> backward n tr er rate
+    return (n', e)
 
 -- | Abstraction of backend to carry out the specification
 class Backend b s where
