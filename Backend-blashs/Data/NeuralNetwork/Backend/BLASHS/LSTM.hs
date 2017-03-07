@@ -101,7 +101,8 @@ type LSTMstreamPrev = VecR
 -- state passed backward
 data LSTMstreamNext = NextNothing
                     | NextJust { nx_mf, nx_mi, nx_mo, nx_f,
-                                 nx_delta_c, nx_delta_f, nx_delta_i, nx_delta_o :: VecR }
+                                 nx_delta_c, nx_delta_f, nx_delta_i, nx_delta_o :: VecR,
+                                 nx_ori_uf, nx_ori_ui, nx_ori_uo :: MatR }
 -- sum-type of the forward and backward state
 type LSTMstreamInfo = Either LSTMstreamPrev LSTMstreamNext
 
@@ -170,13 +171,19 @@ instance Component LSTM where
   backward lstm trace !delta_out rate = do
     Just (Right upward) <- gets (M.lookup $ lstm_id lstm)
 
-    delta_ct <- case upward of
+    (delta_ct, ori_uf, ori_ui, ori_uo) <- case upward of
                   NextNothing -> do
                     tmp <- newDenseVectorCopy (tr_c trace)
                     tmp <<= Apply sigma'
                     tmp <<= tmp :.* tr_o trace
                     tmp <<= tmp :.* delta_out
-                    return tmp
+
+                    -- the original Ui, Uf, Uo are used in calc delta_ct,
+                    -- so save a copy in state.
+                    ori_uf <- newDenseMatrixCopy (parm_u_f lstm)
+                    ori_ui <- newDenseMatrixCopy (parm_u_i lstm)
+                    ori_uo <- newDenseMatrixCopy (parm_u_o lstm)
+                    return (tmp, ori_uf, ori_ui, ori_uo)
                   nx -> do
                     tmp <- newDenseVectorCopy (tr_c trace)
                     tmp <<= nx_f nx :.* nx_delta_c nx
@@ -190,23 +197,23 @@ instance Component LSTM where
 
                     mf_tp1 <- newDenseVectorCopy (nx_mf nx)
                     mf_tp1 <<= Apply sigma'
-                    mf_tp1 <<= parm_u_f lstm :#> mf_tp1
+                    mf_tp1 <<= nx_ori_uf nx :#> mf_tp1
                     mf_tp1 <<= mf_tp1 :.* nx_delta_f nx
                     tmp <<= tmp :.+ mf_tp1
 
                     mi_tp1 <- newDenseVectorCopy (nx_mi nx)
                     mi_tp1 <<= Apply sigma'
-                    mi_tp1 <<= parm_u_i lstm :#> mi_tp1
+                    mi_tp1 <<= nx_ori_ui nx :#> mi_tp1
                     mi_tp1 <<= mi_tp1 :.* nx_delta_i nx
                     tmp <<= tmp :.+ mi_tp1
 
                     mo_tp1 <- newDenseVectorCopy (nx_mo nx)
                     mo_tp1 <<= Apply sigma'
-                    mo_tp1 <<= parm_u_o lstm :#> mo_tp1
+                    mo_tp1 <<= nx_ori_uo nx :#> mo_tp1
                     mo_tp1 <<= mo_tp1 :.* nx_delta_o nx
                     tmp <<= tmp :.+ mo_tp1
 
-                    return tmp
+                    return (tmp, nx_ori_uf nx, nx_ori_ui nx, nx_ori_uo nx)
 
     delta_ft  <- newDenseVector (lstm_osize lstm)
     delta_ft <<= tr_c' trace :.* delta_ct
@@ -221,7 +228,7 @@ instance Component LSTM where
 
     delta_bc  <- newDenseVectorCopy (tr_n trace)
     delta_bc <<= Apply sigma'
-    delta_bc <<= delta_bc :.* tr_inp trace
+    delta_bc <<= delta_bc :.* tr_i trace
     delta_bc <<= delta_bc :.* delta_ct
 
     delta_bf  <- newDenseVectorCopy (tr_mf trace)
@@ -318,7 +325,7 @@ instance Component LSTM where
     delta_wo <<= Scale rate
     parm_w_o lstm <<= parm_w_o lstm :.+ delta_wo
     delta_uf <<= Scale rate
-    parm_u_f  lstm<<= parm_u_f lstm :.+ delta_uf
+    parm_u_f lstm <<= parm_u_f lstm :.+ delta_uf
     delta_ui <<= Scale rate
     parm_u_i lstm <<= parm_u_i lstm :.+ delta_ui
     delta_uo <<= Scale rate
@@ -333,7 +340,10 @@ instance Component LSTM where
                 nx_delta_c = delta_ct,
                 nx_delta_f = delta_ft,
                 nx_delta_i = delta_it,
-                nx_delta_o = delta_ot
+                nx_delta_o = delta_ot,
+                nx_ori_uf  = ori_uf,
+                nx_ori_ui  = ori_ui,
+                nx_ori_uo  = ori_uo
               })
     return (lstm, delta_inp)
 
