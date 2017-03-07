@@ -48,6 +48,7 @@ library
   other-modules:       Data.NeuralNetwork.Backend.BLASHS.Layers
                        Data.NeuralNetwork.Backend.BLASHS.Utils
                        Data.NeuralNetwork.Backend.BLASHS.LSTM
+                       Data.NeuralNetwork.Backend.BLASHS.Eval
                        Data.NeuralNetwork.Backend.BLASHS.SIMD
   default-language:    Haskell2010
   default-extensions:  TypeFamilies, DeriveDataTypeable, MultiParamTypeClasses,

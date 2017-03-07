@@ -15,13 +15,17 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE DataKinds #-}
 module Data.NeuralNetwork.Stack (
   Stack(..),
-  CE, CL, CR, LiftRun
+  CE, CL, CR, LiftRun,
 ) where
 
 import Data.Data
+import Data.HVect
+import GHC.TypeLits
 import Control.Monad.Trans
+import Control.Monad.Except (MonadError)
 import Data.NeuralNetwork
 import Data.NeuralNetwork.Common
 
@@ -102,9 +106,24 @@ instance (Component a, Component b,
     (a', !idelta) <- lift $ backward a tra odelta rate
     return (Stack a' b', idelta)
 
-instance (Monad m, TranslateBody m a, TranslateBody m c, BodySize a) => TranslateBody m (a :++ c) where
-  -- ':++' is translated to the stacking component.
-  type SpecToCom (a :++ b) = Stack (SpecToCom a) (SpecToCom b) (LiftRun (Run (SpecToCom a)) (Run (SpecToCom b)))
-  trans s (a :++ c) = do u <- trans s a
-                         v <- trans (bsize s a) c
-                         return $ Stack u v
+-- internal type class to do induction on a non-empty hvect
+class HVectStackable m a b where
+  type HVectSpecToCom a b
+  hvectTrans :: LayerSize -> HVect (a ': b) -> m (HVectSpecToCom a b)
+
+instance BodyTrans m a => HVectStackable m a '[] where
+  type HVectSpecToCom a '[] = SpecToCom a
+  hvectTrans sz (a :&: HNil) = btrans sz a
+
+instance (BodyTrans m a, BodySize a, HVectStackable m b c) => HVectStackable m a (b ': c) where
+  type HVectSpecToCom a (b ': c) = Stack (SpecToCom a) (HVectSpecToCom b c) (LiftRun (Run (SpecToCom a)) (Run (HVectSpecToCom b c)))
+  hvectTrans sz (a :&: bc) = do c0 <- btrans sz a
+                                cs <- hvectTrans (bsize sz a) bc
+                                return (Stack c0 cs)
+
+instance (MonadError ErrCode m, HVectStackable m s0 ss) => BodyTrans m (HVect (s0 ': ss)) where
+  type SpecToCom (HVect (s0 ': ss)) = HVectSpecToCom s0 ss
+  btrans sz spec = hvectTrans sz spec
+
+instance MonadError ErrCode m => BodyTrans m (HVect '[]) where
+  type SpecToCom (HVect '[]) = TypeError (Text "HVect '[] is not a valid specification of Neural Network")

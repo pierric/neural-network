@@ -1,6 +1,6 @@
 ------------------------------------------------------------
 -- |
--- Module      :  Data.NeuralNetwork.Backend.BLASHS.Utils
+-- Module      :  Data.NeuralNetwork.Backend.BLASHS.Layers
 -- Description :  A backend for neuralnetwork with blas-hs.
 -- Copyright   :  (c) 2016 Jiasen Wu
 -- License     :  BSD-style (see the file LICENSE)

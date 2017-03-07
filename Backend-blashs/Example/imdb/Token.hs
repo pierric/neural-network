@@ -1,7 +1,9 @@
 module Token where
 
-import Data.Text
+import qualified Data.Text as Text
+import Control.Monad
 import NLP.Tokenize.Text
 
-tokenize :: Text -> IO [Text]
-tokenize = return . run whitespace
+tokenize :: Text.Text -> IO [Text.Text]
+tokenize text = do
+  return $ run whitespace text
