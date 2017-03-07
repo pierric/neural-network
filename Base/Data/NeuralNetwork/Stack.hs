@@ -27,7 +27,6 @@ import GHC.TypeLits
 import Control.Monad.Trans
 import Control.Monad.Except (MonadError)
 import Data.NeuralNetwork
-import Data.NeuralNetwork.Common
 
 data Stack a b c = Stack a b
   deriving Typeable
@@ -127,3 +126,15 @@ instance (MonadError ErrCode m, HVectStackable m s0 ss) => BodyTrans m (HVect (s
 
 instance MonadError ErrCode m => BodyTrans m (HVect '[]) where
   type SpecToCom (HVect '[]) = TypeError (Text "HVect '[] is not a valid specification of Neural Network")
+
+class HVectSize a b where
+  hvectSize  :: LayerSize -> HVect (a ': b) -> LayerSize
+
+instance BodySize a => HVectSize a '[] where
+  hvectSize  sz (a :&: HNil) = bsize sz a
+
+instance (BodySize a, HVectSize b c) => HVectSize a (b ': c) where
+  hvectSize  sz (a :&: bc) = hvectSize (bsize sz a) bc
+
+instance (HVectSize s0 ss) => BodySize (HVect (s0 ': ss)) where
+  bsize s spec = hvectSize s spec
