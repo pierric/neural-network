@@ -14,7 +14,6 @@ import System.Environment
 import Text.PrettyPrint.Free hiding (flatten)
 import System.IO (hFlush, stdout)
 import System.IO.Unsafe
-import Data.HVect (HVect(..))
 import Parser
 
 main = do x <- runExceptT $ compile ByBLASHS (In2D 28 28,

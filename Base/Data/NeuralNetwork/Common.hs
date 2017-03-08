@@ -28,6 +28,7 @@ module Data.NeuralNetwork.Common(
   SpecFlow(..),
   SpecMeanPooling(..),
   SpecEvaluator(..),
+  HVect((:&:),HNil)
 ) where
 
 import Control.Monad.Except (MonadError)

@@ -11,7 +11,6 @@ import System.IO (hFlush, stdout)
 import Data.IORef
 import Data.List (partition)
 import Text.Printf (printf)
-import Data.HVect (HVect(..))
 import Text.PrettyPrint.Free hiding ((</>))
 import Data.NeuralNetwork
 import Data.NeuralNetwork.Adapter
@@ -68,10 +67,10 @@ dotest (nn,_) dataset = do
 
 online :: (ModelCst n e, Run n ~ IO, Inp n ~ Sentence, Val e ~ Sentiment)
        => Float -> BV.Vector (Inp n, Out n) -> (n, e) -> IO (n, e)
-online rate ds (n, e) = walk (BV.toList ds) n
+online rate ds nn = walk (BV.toList ds) nn
   where
-    walk []     nn = return (nn, e)
-    walk (d:ds) nn = do nn <- learn (nn, e) d rate
+    walk []     nn = return nn
+    walk (d:ds) nn = do nn <- learn nn d rate
                         walk ds nn
 
 iterateM :: (MonadIO m) => Int -> a -> (a -> m a) -> m a
