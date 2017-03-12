@@ -11,10 +11,12 @@
 --
 -- This module supplies a LSTM component.
 ------------------------------------------------------------
+{-# LANGUAGE UndecidableInstances #-}
 module Data.NeuralNetwork.Backend.BLASHS.LSTM(
   LSTM(..), LSTM_Env_Transformer, newLSTM, Stream(..),
 ) where
 
+import Blas.Generic.Unsafe (Numeric)
 import Control.Monad.State.Strict
 import Data.Foldable (foldrM)
 import qualified Data.Vector as V
@@ -30,21 +32,22 @@ import Data.NeuralNetwork.Backend.BLASHS.Utils
 import Data.NeuralNetwork.Backend.BLASHS.SIMD
 import System.Random.MWC
 import System.Random.MWC.Distributions
-import GHC.Float (double2Float)
+-- import GHC.Float (double2Float)
+import Data.Vector.Storable (Storable)
 import qualified Text.PrettyPrint.Free as P
 
-type VecR = DenseVector Float
-type MatR = DenseMatrix Float
+type VecR p = DenseVector p
+type MatR p = DenseMatrix p
 type LSTMident = Int
 
-data LSTM = LLSTM { parm_w_f :: MatR, parm_w_i :: MatR, parm_w_o :: MatR, parm_w_c :: MatR
-                  , parm_u_f :: MatR, parm_u_i :: MatR, parm_u_o :: MatR
-                  , parm_b_f :: VecR, parm_b_i :: VecR, parm_b_o :: VecR, parm_b_c :: VecR
-                  , lstm_id  :: LSTMident, lstm_isize, lstm_osize :: Int
-                  }
+data LSTM p = LLSTM { parm_w_f :: MatR p, parm_w_i :: MatR p, parm_w_o :: MatR p, parm_w_c :: MatR p
+                    , parm_u_f :: MatR p, parm_u_i :: MatR p, parm_u_o :: MatR p
+                    , parm_b_f :: VecR p, parm_b_i :: VecR p, parm_b_o :: VecR p, parm_b_c :: VecR p
+                    , lstm_id  :: LSTMident, lstm_isize, lstm_osize :: Int
+                    }
   deriving Typeable
 
-instance Data LSTM where
+instance Data p => Data (LSTM p) where
   toConstr a = lstmConstr
   gfoldl f z a = z (\i->a{lstm_id=i}) `f` (lstm_id a)
   gunfold k z c = errorWithoutStackTrace "Data.Data.gunfold(LSTM)"
@@ -56,14 +59,15 @@ lstmDataType = mkDataType "Data.NeuralNetwork.Backend.BLASHS.LSTM.LSTM" [lstmCon
 global_LSTM_id_counter :: IORef Int
 global_LSTM_id_counter = unsafePerformIO (newIORef 0)
 -- | create a new LSTM component
-newLSTM :: Int        -- ^ input size
+newLSTM :: (Numeric p, RealType p, SIMDable p)
+        => Int        -- ^ input size
         -> Int        -- ^ output size
-        -> IO LSTM    -- ^ the new layer
+        -> IO (LSTM p)-- ^ the new layer
 newLSTM m n =
   withSystemRandom . asGenIO $ \gen -> do
-    let newW v = do raw <- newDenseVectorByGen (double2Float <$> normal 0 v gen) (m*n)
+    let newW v = do raw <- newDenseVectorByGen (fromDouble <$> normal 0 v gen) (m*n)
                     return $ v2m m n raw
-        newU v = do raw <- newDenseVectorByGen (double2Float <$> normal 0 v gen) (n*n)
+        newU v = do raw <- newDenseVectorByGen (fromDouble <$> normal 0 v gen) (n*n)
                     return $ v2m n n raw
         newB v = newDenseVectorConst n v
     parm_w_f <- newW 0.01
@@ -97,25 +101,25 @@ newLSTM m n =
     }
 
 -- state passed forward
-type LSTMstreamPrev = VecR
+type LSTMstreamPrev p = VecR p
 -- state passed backward
-data LSTMstreamNext = NextNothing
-                    | NextJust { nx_mf, nx_mi, nx_mo, nx_f,
-                                 nx_delta_c, nx_delta_f, nx_delta_i, nx_delta_o :: VecR,
-                                 nx_ori_uf, nx_ori_ui, nx_ori_uo :: MatR }
+data LSTMstreamNext p = NextNothing
+                      | NextJust { nx_mf, nx_mi, nx_mo, nx_f,
+                                   nx_delta_c, nx_delta_f, nx_delta_i, nx_delta_o :: VecR p,
+                                   nx_ori_uf, nx_ori_ui, nx_ori_uo :: MatR p }
 -- sum-type of the forward and backward state
-type LSTMstreamInfo = Either LSTMstreamPrev LSTMstreamNext
+type LSTMstreamInfo p = Either (LSTMstreamPrev p) (LSTMstreamNext p)
 
-type LSTM_Env_Transformer = StateT (M.Map LSTMident LSTMstreamInfo)
+type LSTM_Env_Transformer p = StateT (M.Map LSTMident (LSTMstreamInfo p))
 
-instance Component LSTM where
+instance (Numeric p, RealType p, SIMDable p) => Component (LSTM p) where
   -- The state is mapping from LSTM identifier to Info.
   -- So when mutiple LSTM compoents are stacked, each can
   -- access its own state.
-  type Run LSTM = LSTM_Env_Transformer IO
-  type Inp LSTM = VecR
-  type Out LSTM = VecR
-  data Trace LSTM = LTrace { tr_mf, tr_mi, tr_mo, tr_n, tr_f, tr_i, tr_o, tr_c', tr_c, tr_inp, tr_out :: VecR }
+  type Run (LSTM p) = LSTM_Env_Transformer p IO
+  type Inp (LSTM p) = VecR p
+  type Out (LSTM p) = VecR p
+  data Trace (LSTM p) = LTrace { tr_mf, tr_mi, tr_mo, tr_n, tr_f, tr_i, tr_o, tr_c', tr_c, tr_inp, tr_out :: VecR p }
   forwardT lstm x_t = do
     Just (Left c_tm1) <- gets (M.lookup $ lstm_id lstm)
 
@@ -308,27 +312,28 @@ instance Component LSTM where
     tmp <<= tmp :.* delta_ct
     delta_inp <<+ parm_w_c lstm :#> tmp
 
-    delta_bc <<= Scale rate
+    let rate' = fromFloat rate
+    delta_bc <<= Scale rate'
     parm_b_c lstm <<= parm_b_c lstm :.+ delta_bc
-    delta_bf <<= Scale rate
+    delta_bf <<= Scale rate'
     parm_b_f lstm <<= parm_b_f lstm :.+ delta_bf
-    delta_bi <<= Scale rate
+    delta_bi <<= Scale rate'
     parm_b_i lstm <<= parm_b_i lstm :.+ delta_bi
-    delta_bo <<= Scale rate
+    delta_bo <<= Scale rate'
     parm_b_o lstm <<= parm_b_o lstm :.+ delta_bo
-    delta_wc <<= Scale rate
+    delta_wc <<= Scale rate'
     parm_w_c lstm <<= parm_w_c lstm :.+ delta_wc
-    delta_wf <<= Scale rate
+    delta_wf <<= Scale rate'
     parm_w_f lstm <<= parm_w_f lstm :.+ delta_wf
-    delta_wi <<= Scale rate
+    delta_wi <<= Scale rate'
     parm_w_i lstm <<= parm_w_i lstm :.+ delta_wi
-    delta_wo <<= Scale rate
+    delta_wo <<= Scale rate'
     parm_w_o lstm <<= parm_w_o lstm :.+ delta_wo
-    delta_uf <<= Scale rate
+    delta_uf <<= Scale rate'
     parm_u_f lstm <<= parm_u_f lstm :.+ delta_uf
-    delta_ui <<= Scale rate
+    delta_ui <<= Scale rate'
     parm_u_i lstm <<= parm_u_i lstm :.+ delta_ui
-    delta_uo <<= Scale rate
+    delta_uo <<= Scale rate'
     parm_u_o lstm <<= parm_u_o lstm :.+ delta_uo
 
     modify $ M.insert (lstm_id lstm)
@@ -350,7 +355,11 @@ instance Component LSTM where
 newtype Stream a = Stream a
   deriving (Typeable, Data)
 
-instance (Data a, Component a, Inp a ~ VecR, Run a ~ Run LSTM) => Component (Stream a) where
+instance (Data a, Component a,
+          Inp a ~ VecR (Dty a),
+          Typeable (Dty a), Numeric (Dty a), RealType (Dty a), SIMDable (Dty a),
+          Run a ~ Run (LSTM (Dty a))) => Component (Stream a) where
+  type Dty (Stream a) = Dty a
   type Run (Stream a) = IO
   type Inp (Stream a) = [Inp a]
   type Out (Stream a) = [Out a]
@@ -376,9 +385,11 @@ instance (Data a, Component a, Inp a ~ VecR, Run a ~ Run LSTM) => Component (Str
         (c', di) <- backward c tr dout rate
         return (c', di:ds)
 
-collectLSTMs :: Data a => a -> [LSTM]
+collectLSTMs :: (Data a, Component a, Typeable (Dty a)) => a -> [LSTM (Dty a)]
 collectLSTMs = everything (++) ([] `mkQ` isLSTM)
-  where isLSTM a@(LLSTM{}) = [a]
+  where
+    isLSTM a@(LLSTM{}) = [a]
 
+sigma, sigma' :: SIMDable a => SIMDPACK a -> SIMDPACK a
 sigma  = tanh
 sigma' = tanh'

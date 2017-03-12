@@ -53,6 +53,7 @@ instance (Component a, Component b,
           Run a ~ Run b,
           Out a ~ Inp b
          ) => Component (Stack a b CE) where
+  type Dty (Stack a b CE) = Dty a
   type Run (Stack a b CE) = Run a
   type Inp (Stack a b CE) = Inp a
   type Out (Stack a b CE) = Out b
@@ -72,6 +73,7 @@ instance (Component a, Component b,
           MonadTrans t, Run a ~ t (Run b),
           Out a ~ Inp b
          ) => Component (Stack a b (CL t)) where
+  type Dty (Stack a b (CL t)) = Dty a
   type Run (Stack a b (CL t)) = Run a
   type Inp (Stack a b (CL t)) = Inp a
   type Out (Stack a b (CL t)) = Out b
@@ -91,6 +93,7 @@ instance (Component a, Component b,
           MonadTrans t, Run b ~ t (Run a),
           Out a ~ Inp b
          ) => Component (Stack a b (CR t)) where
+  type Dty (Stack a b (CR t)) = Dty a
   type Run (Stack a b (CR t)) = Run b
   type Inp (Stack a b (CR t)) = Inp a
   type Out (Stack a b (CR t)) = Out b
@@ -106,26 +109,26 @@ instance (Component a, Component b,
     return (Stack a' b', idelta)
 
 -- internal type class to do induction on a non-empty hvect
-class HVectStackable m a b where
-  type HVectSpecToCom a b
-  hvectTrans :: LayerSize -> HVect (a ': b) -> m (HVectSpecToCom a b)
+class HVectStackable m k a b where
+  type HVectSpecToCom k a b
+  hvectTrans :: k -> LayerSize -> HVect (a ': b) -> m (HVectSpecToCom k a b)
 
-instance BodyTrans m a => HVectStackable m a '[] where
-  type HVectSpecToCom a '[] = SpecToCom a
-  hvectTrans sz (a :&: HNil) = btrans sz a
+instance BodyTrans m k a => HVectStackable m k a '[] where
+  type HVectSpecToCom k a '[] = SpecToCom k a
+  hvectTrans bk sz (a :&: HNil) = btrans bk sz a
 
-instance (BodyTrans m a, BodySize a, HVectStackable m b c) => HVectStackable m a (b ': c) where
-  type HVectSpecToCom a (b ': c) = Stack (SpecToCom a) (HVectSpecToCom b c) (LiftRun (Run (SpecToCom a)) (Run (HVectSpecToCom b c)))
-  hvectTrans sz (a :&: bc) = do c0 <- btrans sz a
-                                cs <- hvectTrans (bsize sz a) bc
-                                return (Stack c0 cs)
+instance (BodyTrans m k a, BodySize a, HVectStackable m k b c) => HVectStackable m k a (b ': c) where
+  type HVectSpecToCom k a (b ': c) = Stack (SpecToCom k a) (HVectSpecToCom k b c) (LiftRun (Run (SpecToCom k a)) (Run (HVectSpecToCom k b c)))
+  hvectTrans bk sz (a :&: bc) = do c0 <- btrans bk sz a
+                                   cs <- hvectTrans bk (bsize sz a) bc
+                                   return (Stack c0 cs)
 
-instance (MonadError ErrCode m, HVectStackable m s0 ss) => BodyTrans m (HVect (s0 ': ss)) where
-  type SpecToCom (HVect (s0 ': ss)) = HVectSpecToCom s0 ss
-  btrans sz spec = hvectTrans sz spec
+instance (MonadError ErrCode m, HVectStackable m k s0 ss) => BodyTrans m k (HVect (s0 ': ss)) where
+  type SpecToCom k (HVect (s0 ': ss)) = HVectSpecToCom k s0 ss
+  btrans bk sz spec = hvectTrans bk sz spec
 
-instance MonadError ErrCode m => BodyTrans m (HVect '[]) where
-  type SpecToCom (HVect '[]) = TypeError (Text "HVect '[] is not a valid specification of Neural Network")
+instance MonadError ErrCode m => BodyTrans m k (HVect '[]) where
+  type SpecToCom k (HVect '[]) = TypeError (Text "HVect '[] is not a valid specification of Neural Network")
 
 class HVectSize a b where
   hvectSize  :: LayerSize -> HVect (a ': b) -> LayerSize
