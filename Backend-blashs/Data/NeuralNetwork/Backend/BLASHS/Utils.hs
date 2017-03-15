@@ -35,7 +35,7 @@ module Data.NeuralNetwork.Backend.BLASHS.Utils (
   v2m, m2v, v2ma, ma2v,
   Op(..), AssignTo(..),
   sumElements, corr2, conv2, pool, unpool, transpose,
-  prettyDenseVectorFloat,
+  prettyDenseVector,
   unsafeReadV, unsafeWriteV,
   unsafeReadM, unsafeWriteM,
 ) where
@@ -51,7 +51,7 @@ import Control.Monad
 import Control.Monad.Trans (MonadIO, liftIO)
 import Data.IORef
 import Foreign.Marshal.Array (advancePtr)
-import Text.Printf (printf)
+import Text.Printf (printf, PrintfArg)
 import qualified Text.PrettyPrint.Free as P
 import System.IO.Unsafe (unsafePerformIO)
 import Data.NeuralNetwork.Backend.BLASHS.SIMD
@@ -564,6 +564,6 @@ gemm_helper transA transB rowA colB colA alpha x xlda y ylda beta v vlda =
   V.unsafeWith v (\pv -> do
     gemm ColMajor transA transB rowA colB colA alpha px xlda py ylda beta pv vlda)))
 
-prettyDenseVectorFloat :: DenseVector Float -> P.Doc e
-prettyDenseVectorFloat vec = let a = unsafePerformIO (denseVectorToVector vec)
-                             in P.encloseSep P.langle P.rangle P.comma $ map (P.text . printf "%.02f") (BV.toList a)
+prettyDenseVector :: (PrintfArg a, RealFloat a, V.Storable a) => DenseVector a -> P.Doc e
+prettyDenseVector vec = let a = unsafePerformIO (denseVectorToVector vec)
+                        in P.encloseSep P.langle P.rangle P.comma $ map (P.text . printf "%.02f") (BV.toList a)

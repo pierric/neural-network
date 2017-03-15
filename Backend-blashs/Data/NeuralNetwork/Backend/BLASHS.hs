@@ -18,6 +18,7 @@ module Data.NeuralNetwork.Backend.BLASHS (
   -- module Data.NeuralNetwork.Backend.BLASHS.Layers,
   module Data.NeuralNetwork.Backend.BLASHS.Utils,
   module Data.NeuralNetwork.Backend.BLASHS.LSTM,
+  module Data.NeuralNetwork.Backend.BLASHS.SIMD,
   ByBLASHS(..), byBLASHSf, byBLASHSd
 ) where
 
