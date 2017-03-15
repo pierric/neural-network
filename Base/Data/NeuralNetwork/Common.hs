@@ -33,12 +33,21 @@ module Data.NeuralNetwork.Common(
 ) where
 
 import Control.Monad.Except (MonadError)
+import GHC.Float (double2Float, float2Double)
 import Data.Data
 import Data.HVect
 
-class Fractional a => RealType a where
+class (Fractional a, Ord a) => RealType a where
   fromDouble :: Double -> a
   fromFloat  :: Float  -> a
+
+instance RealType Float where
+  fromDouble = double2Float
+  fromFloat  = id
+
+instance RealType Double where
+  fromDouble = id
+  fromFloat  = float2Double
 
 -- It is necessary to propagate the size along the layers,
 -- because fullconnect and convolution need to know

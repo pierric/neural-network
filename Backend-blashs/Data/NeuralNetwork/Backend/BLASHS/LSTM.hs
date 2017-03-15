@@ -116,6 +116,7 @@ instance (Numeric p, RealType p, SIMDable p) => Component (LSTM p) where
   -- The state is mapping from LSTM identifier to Info.
   -- So when mutiple LSTM compoents are stacked, each can
   -- access its own state.
+  type Dty (LSTM p) = p
   type Run (LSTM p) = LSTM_Env_Transformer p IO
   type Inp (LSTM p) = VecR p
   type Out (LSTM p) = VecR p

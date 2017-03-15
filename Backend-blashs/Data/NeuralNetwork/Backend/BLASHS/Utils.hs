@@ -472,7 +472,7 @@ fill wrk@(DenseMatrix _ _ vwrk) m u v kr kc = do
 -- | max-pooling, picking out the maximum element in each stride x stride
 -- sub-matrices. Assuming that the original matrix row and column size are
 -- both multiple of stride.
-pool :: MonadIO m => Int -> DenseMatrix Float -> m (DenseVector Int, DenseMatrix Float)
+pool :: (MonadIO m, V.Storable p, Fractional p, Ord p) => Int -> DenseMatrix p -> m (DenseVector Int, DenseMatrix p)
 pool 1 mat = do
   let (r,c) = size mat
   vi <- newDenseVector (r*c)
@@ -505,7 +505,7 @@ pool stride mat = do
       return (p, v)
 
 -- | The reverse of max-pooling.
-unpool :: MonadIO m => Int -> DenseVector Int -> DenseMatrix Float -> m (DenseMatrix Float)
+unpool :: (MonadIO m, V.Storable p, Fractional p, Ord p) => Int -> DenseVector Int -> DenseMatrix p -> m (DenseMatrix p)
 unpool stride idx mat = do
   mat' <- newDenseMatrix r' c'
   forM_ [0..r-1] $ \i -> do
