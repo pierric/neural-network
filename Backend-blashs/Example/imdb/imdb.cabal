@@ -15,7 +15,7 @@ executable imdb
   other-modules:       Corpus, Token
   build-depends:       base >= 4.7 && < 5, neural-network-base,
                        constraints, vector, mtl, filepath, directory,
-                       bytestring, text, tokenize, containers,
-                       wl-pprint-extras, mwc-random, hvect,
+                       bytestring, text, tokenize, containers, blas-hs,
+                       wl-pprint-extras, mwc-random,
                        neural-network-blashs
   default-language:    Haskell2010

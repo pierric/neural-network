@@ -15,5 +15,5 @@ executable mnist
   other-modules:       Parser
   build-depends:       base >= 4.7 && < 5, neural-network-base, binary,
                        constraints, vector, bytestring, zlib, parallel, mtl,
-                       hvect, wl-pprint-extras, neural-network-blashs
+                       wl-pprint-extras, neural-network-blashs
   default-language:    Haskell2010

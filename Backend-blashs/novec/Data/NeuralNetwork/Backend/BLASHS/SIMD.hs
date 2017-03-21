@@ -12,6 +12,7 @@
 -- This module supplies a collection of calculations that
 -- could be implemented on top of SIMD.
 ------------------------------------------------------------
+{-# LANGUAGE StandaloneDeriving, GeneralizedNewtypeDeriving #-}
 module Data.NeuralNetwork.Backend.BLASHS.SIMD (
   SIMDable(..),
   cost', relu, relu', tanh, tanh'
@@ -62,14 +63,56 @@ instance SIMDable Float where
         unsafeWrite z 0 (unF $ op (F a))
         go (n-1) (unsafeTail z) (unsafeTail x)
 
--- | SIMD based, RELU and derivative of RELU
-relu, relu' :: SIMDPACK Float -> SIMDPACK Float
-relu  (F a) = F $ B.relu  a
-relu' (F a) = F $ B.relu' a
+instance SIMDable Double where
+  newtype SIMDPACK Double = D { unD :: Double}
+  plus  (D a) (D b) = D (a + b)
+  minus (D a) (D b) = D (a - b)
+  times (D a) (D b) = D (a * b)
+  divide (D a) (D b) = D (a / b)
+  hadamard op v x y = assert (MV.length x == sz && MV.length y == sz) $ do
+    go sz v x y
+    where
+      sz = MV.length v
+      go 0 _ _ _ = return ()
+      go n z x y = do
+        a <- unsafeRead x 0
+        b <- unsafeRead y 0
+        unsafeWrite z 0 (unD $ op (D a) (D b))
+        go (n-1) (unsafeTail z) (unsafeTail x) (unsafeTail y)
 
--- | SIMD based, derivative of error measurement
-cost' :: SIMDPACK Float -> SIMDPACK Float -> SIMDPACK Float
-cost' (F a) (F b) = F (B.cost' a b)
+  konst = D
+
+  foreach op v x = assert (sz == MV.length x) $ do
+    go sz v x
+    where
+      sz = MV.length v
+      go 0 _ _ = return ()
+      go n z x = do
+        a <- unsafeRead x 0
+        unsafeWrite z 0 (unD $ op (D a))
+        go (n-1) (unsafeTail z) (unsafeTail x)
+
+deriving instance Eq  (SIMDPACK Float)
+deriving instance Num (SIMDPACK Float)
+deriving instance Ord (SIMDPACK Float)
+deriving instance Fractional (SIMDPACK Float)
+deriving instance Floating   (SIMDPACK Float)
+deriving instance Eq  (SIMDPACK Double)
+deriving instance Num (SIMDPACK Double)
+deriving instance Ord (SIMDPACK Double)
+deriving instance Fractional (SIMDPACK Double)
+deriving instance Floating   (SIMDPACK Double)
+
+-- | RELU and derivative of RELU
+relu, relu' :: (Num a, Ord a) => a -> a
+relu = max 0
+relu' x | x < 0     = 0
+        | otherwise = 1
+
+-- | derivative of error measurement
+cost' :: (Num a, Ord a) => a -> a -> a
+cost' a y | y == 1 && a >= y = 0
+          | otherwise        = a - y
 
 tanh, tanh' :: SIMDPACK Float -> SIMDPACK Float
 tanh (F x)  = F (Prelude.tanh x)
