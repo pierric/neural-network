@@ -20,7 +20,7 @@ import Data.NeuralNetwork.Backend.BLASHS
 import Token
 
 type Sentence  = [Int]
-type Sentiment = DenseVector Float
+type Sentiment = DenseVector Double
 
 slice = id -- (take 6000 <$>)
 

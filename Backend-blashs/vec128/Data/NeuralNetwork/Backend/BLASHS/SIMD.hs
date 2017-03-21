@@ -39,7 +39,7 @@ class SIMDVector v => Comparable v where
   compareVector :: CompareFunc -> v -> v -> Select v
   selectVector  :: Select v -> v -> v -> v
 
-class SIMDable a where
+class (Num a, SIMDVector (SIMDPACK a), Comparable (SIMDPACK a)) => SIMDable a where
   data SIMDPACK a
   hadamard :: (SIMDPACK a -> SIMDPACK a -> SIMDPACK a) -> IOVector a -> IOVector a -> IOVector a -> IO ()
   konst    :: a -> SIMDPACK a
@@ -75,7 +75,7 @@ class SIMDVector v where
     unpackVector     :: v -> ElemTuple v
 
 -- | SIMD based, RELU and derivative of RELU
-relu, relu' :: (SIMDable a, Num a, SIMDVector (SIMDPACK a), Comparable (SIMDPACK a)) => SIMDPACK a -> SIMDPACK a
+relu, relu' :: (SIMDable a,  Comparable (SIMDPACK a)) => SIMDPACK a -> SIMDPACK a
 relu  x = let v0 = konst 0
           in selectVector (compareVector GE x v0) x v0
 relu' x = let v0 = konst 0
@@ -83,14 +83,14 @@ relu' x = let v0 = konst 0
           in selectVector (compareVector GE v0 x) v0 v1
 
 -- | SIMD based, derivative of error measurement
-cost' :: (SIMDable a, Num a, SIMDVector (SIMDPACK a), Comparable (SIMDPACK a)) => SIMDPACK a -> SIMDPACK a -> SIMDPACK a
+cost' :: SIMDable a => SIMDPACK a -> SIMDPACK a -> SIMDPACK a
 cost' a y = selectVector (compareVector GE a y)
               (selectVector (compareVector GE y (konst 1))
                 (konst 0)
                 (minus a y))
               (minus a y)
 
-tanh, tanh' :: (SIMDable a, Num a, SIMDVector (SIMDPACK a), Comparable (SIMDPACK a)) => SIMDPACK a -> SIMDPACK a
+tanh, tanh' :: SIMDable a => SIMDPACK a -> SIMDPACK a
 tanh  x = let x2 = times x x
               x3 = times x x2
           in minus x (divide x3 (konst 3))

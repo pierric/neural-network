@@ -13,6 +13,7 @@
 ------------------------------------------------------------
 {-# LANGUAGE DataKinds, TypeOperators #-}
 module Data.NeuralNetwork.Common(
+  RealType(..),
   LayerSize(..),
   InputLayer(..),
   BodySize(..), BodyTrans(..), EvalTrans(..),
@@ -32,8 +33,21 @@ module Data.NeuralNetwork.Common(
 ) where
 
 import Control.Monad.Except (MonadError)
+import GHC.Float (double2Float, float2Double)
 import Data.Data
 import Data.HVect
+
+class (Fractional a, Ord a) => RealType a where
+  fromDouble :: Double -> a
+  fromFloat  :: Float  -> a
+
+instance RealType Float where
+  fromDouble = double2Float
+  fromFloat  = id
+
+instance RealType Double where
+  fromDouble = id
+  fromFloat  = float2Double
 
 -- It is necessary to propagate the size along the layers,
 -- because fullconnect and convolution need to know
@@ -68,13 +82,13 @@ instance BodySize a => BodySize (SpecFlow a) where
   bsize (SF n sz) (Flow a) = SF n (bsize sz a)
 
 -- translate the body of specification
-class MonadError ErrCode m => BodyTrans m s where
-  type SpecToCom s
-  btrans :: LayerSize -> s -> m (SpecToCom s)
+class MonadError ErrCode m => BodyTrans m b s where
+  type SpecToCom b s
+  btrans :: b -> LayerSize -> s -> m (SpecToCom b s)
 
-class (MonadError ErrCode m) => EvalTrans m c e where
-  type SpecToEvl c e
-  etrans :: c -> e -> m (SpecToEvl c e)
+class (MonadError ErrCode m) => EvalTrans m b c s where
+  type SpecToEvl b c s
+  etrans :: b -> c -> s -> m (SpecToEvl b c s)
 
 data ErrCode = ErrMismatch
 

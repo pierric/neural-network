@@ -6,12 +6,10 @@ Neural network framework in Haskell
 specification of layers.
 - **Backend-hmatrix**. This package implements the full-connect layer and convolution
 layer based on hmatrix library. It has a simple and plain representation but some issues
-in both time and space performance.
-- **MNIST**. Solve the MNIST with the Backend-hmatrix.
+in both time and space efficiency.
 - **Backend-blashs**. This package implements the full-connect layer and convolution
 layer based on blas-hs library. A imperative interface for manipulating dense vector
 and matrix is devised for better storage utilization.
-- **MNIST2**. Solve the MNIST2 with the Backend-blashs.
 
 
 ## Build with stack tool

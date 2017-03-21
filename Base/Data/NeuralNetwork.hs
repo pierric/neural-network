@@ -28,6 +28,7 @@ import Data.NeuralNetwork.Common
 
 -- | Abstraction of a neural network component
 class Component a where
+  type Dty a :: *
   -- | execution environment
   type Run a :: * -> *
   -- | the type of input and in-error
@@ -52,7 +53,7 @@ class Monad m => Evaluator m a where
   cost :: a -> Val a -> Val a -> m (Val a)
 
 type ModelCst   a b   = (Component a, Monad (Run a), Evaluator (Run a) b, Out a ~ Val b)
-type BackendCst a b e = (ModelCst a b, RunInEnv (Run a) e)
+type BackendCst e a b = (ModelCst a b, RunInEnv (Run a) e)
 
 -- | By giving a way to measure the error, 'learn' can update the
 -- neural network component.
@@ -77,7 +78,7 @@ class Backend b s where
   type EvaluatorFromSpec b s :: *
   -- | necessary constraints of the resulting type
   witness :: b -> s -> Dict ( Monad (Env b)
-                            , BackendCst (ComponentFromSpec b s) (EvaluatorFromSpec b s) (Env b))
+                            , BackendCst (Env b) (ComponentFromSpec b s) (EvaluatorFromSpec b s))
   -- | compile the specification to runnable component.
   compile :: b -> s -> Env b ((ComponentFromSpec b s), (EvaluatorFromSpec b s))
 

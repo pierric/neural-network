@@ -12,6 +12,7 @@ import Data.IORef
 import Data.List (partition)
 import Text.Printf (printf)
 import Text.PrettyPrint.Free hiding ((</>))
+import Blas.Generic.Unsafe (Numeric)
 import Data.NeuralNetwork
 import Data.NeuralNetwork.Adapter
 import Data.NeuralNetwork.Backend.BLASHS
@@ -20,7 +21,7 @@ import Corpus
 main = do putStrLn "Start."
           (nv, trdata, tsdata) <- corpus 1000
           let cc = Embedding nv :&: Flow (LSTM 128) :&: Cutoff 80 :&: Concat :&: FullConnect 10 :&: HNil
-          x <- runExceptT $ compile ByBLASHS (InStream 1, cc, MeanSquaredError)
+          x <- runExceptT $ compile byBLASHSd (InStream 1, cc, MeanSquaredError)
           case x of
             Left _   -> putStrLn "Error."
             Right nn -> do
@@ -57,8 +58,8 @@ dotest (nn,_) dataset = do
     putStrLn $ "First 10 tests:"
     BV.forM_ (BV.take 10 dataset) $ \(ds,ev) -> do
       pv <- forward nn ds
-      putStrLn $ showPretty $ text "+" <+> prettyDenseVectorFloat pv
-      putStrLn $ showPretty $ text "*" <+> prettyDenseVectorFloat ev
+      putStrLn $ showPretty $ text "+" <+> pretty pv
+      putStrLn $ showPretty $ text "*" <+> pretty ev
   where
     postprocess :: Sentiment -> IO Int
     postprocess v = do
@@ -84,17 +85,16 @@ iterateM n x f = go 0 x
                go (i+1) x
 
 data SpecCutoff = Cutoff Int deriving (Typeable, Data)
-type Cutoff = Adapter IO [DenseVector Float] [DenseVector Float] Int
+type Cutoff p = Adapter IO [DenseVector p] [DenseVector p] Int
 
 instance BodySize SpecCutoff where
   bsize (SV (D1 s)) (Cutoff n) = SF n (D1 s)
 
-instance MonadError ErrCode m => BodyTrans m SpecCutoff where
+instance (MonadError ErrCode m, Numeric p, RealType p, SIMDable p) => BodyTrans m (ByBLASHS p) SpecCutoff where
   --
-  type SpecToCom SpecCutoff = Cutoff
-  btrans (SV (D1 s)) (Cutoff n) = return $ cutoff n
+  type SpecToCom (ByBLASHS p) SpecCutoff = Cutoff p
+  btrans _ (SV (D1 s)) (Cutoff n) = return $ cutoff n
     where
-      cutoff :: Num a => Int -> Cutoff
       cutoff n = Adapter to back
       to inp = do
         let r = length inp
@@ -103,36 +103,35 @@ instance MonadError ErrCode m => BodyTrans m SpecCutoff where
       back r odelta = do
         z <- replicateM (r-n) (newDenseVector s)
         return $ take r (odelta ++ z)
-  btrans _ _ = throwError ErrMismatch
+  btrans _ _ _ = throwError ErrMismatch
 
 data SpecConcat = Concat deriving (Typeable, Data)
-type Concat = Adapter IO [DenseVector Float] (DenseVector Float) (Int, Int)
+type Concat p = Adapter IO [DenseVector p] (DenseVector p) (Int, Int)
 
 instance BodySize SpecConcat where
   bsize (SF m (D1 n)) Concat = D1 (m*n)
 
-instance MonadError ErrCode m => BodyTrans m SpecConcat where
-  type SpecToCom SpecConcat = Concat
-  btrans (SF m (D1 n)) Concat = return nconcat
+instance (MonadError ErrCode m, Numeric p, RealType p, SIMDable p) => BodyTrans m (ByBLASHS p) SpecConcat where
+  type SpecToCom (ByBLASHS p) SpecConcat = Concat p
+  btrans _ (SF m (D1 n)) Concat = return nconcat
     where
-      nconcat :: Concat
       nconcat = Adapter to back
       to inp = do let vinp = BV.fromList inp
                   cv <- denseVectorConcat vinp
                   return ((BV.length vinp, size (BV.head vinp)), cv)
       back (m,n) odelta = do let videlta = denseVectorSplit m n odelta
                              return $ BV.toList videlta
-  btrans _ _ = throwError ErrMismatch
+  btrans _ _ _ = throwError ErrMismatch
 
 data SpecEmbedding = Embedding Int deriving (Typeable, Data)
-type Embedding = Adapter IO [Int] [DenseVector Float] ()
+type Embedding p = Adapter IO [Int] [DenseVector p] ()
 
 instance BodySize SpecEmbedding where
   bsize (SV (D1 1)) (Embedding n)= SV (D1 n)
 
-instance MonadError ErrCode m => BodyTrans m SpecEmbedding where
-  type SpecToCom SpecEmbedding = Embedding
-  btrans (SV (D1 s)) (Embedding n) = return $ Adapter to back
+instance (MonadError ErrCode m, Numeric p, RealType p, SIMDable p) => BodyTrans m (ByBLASHS p) SpecEmbedding where
+  type SpecToCom (ByBLASHS p) SpecEmbedding = Embedding p
+  btrans _ (SV (D1 s)) (Embedding n) = return $ Adapter to back
     where
       to inp = do v <- mapM (newDenseVectorDelta n) inp
                   return ((), v)
@@ -142,6 +141,6 @@ instance MonadError ErrCode m => BodyTrans m SpecEmbedding where
         unsafeWriteV v i 1
         return v
 
-instance Pretty (DenseVector Float) where
-  pretty = prettyDenseVectorFloat
+instance Pretty (DenseVector Double) where
+  pretty = prettyDenseVector
 showPretty x = displayS (renderPretty 0.4 500 x) ""

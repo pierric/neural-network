@@ -16,7 +16,7 @@ import System.IO (hFlush, stdout)
 import System.IO.Unsafe
 import Parser
 
-main = do x <- runExceptT $ compile ByBLASHS (In2D 28 28,
+main = do x <- runExceptT $ compile byBLASHSf (In2D 28 28,
                                               Convolution 2 7 3 :&: MaxPooling 2 :&:
                                               Convolution 4 5 2 :&: MaxPooling 2 :&:
                                               Reshape2DAs1D :&:
