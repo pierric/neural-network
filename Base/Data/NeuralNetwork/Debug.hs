@@ -29,8 +29,8 @@ instance BodySize (SpecDebug a) where
   bsize s (Debug _) = s
 
 instance (Pretty a, MonadIO m, MonadError ErrCode m) => BodyTrans m b (SpecDebug a) where
-  type SpecToCom b (SpecDebug a) = Debug a
-  btrans b s (Debug name)= return $ Adapter to back
+  type SpecToCom b o (SpecDebug a) = Debug a
+  btrans b s (Debug name) o = return $ Adapter to back
     where
       to inp = do liftIO $ putStrLn $ (name ++ "-(Forward):" )
                   liftIO $ putStrLn $ showPretty $ indent 2 $ pretty inp

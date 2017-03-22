@@ -39,4 +39,4 @@ instance (Monad m, Typeable m, Typeable i, Typeable o, Typeable e) => Component 
   newtype Trace (Adapter m i o e) = ATrace (e,o)
   forwardT (Adapter f _) i = ATrace <$> (f i)
   output (ATrace (_,o)) = o
-  backward a@(Adapter _ b) (ATrace (e,_)) o _ = b e o >>= \i -> return (a,i)
+  backward a@(Adapter _ b) (ATrace (e,_)) o = b e o >>= \i -> return (a,i)

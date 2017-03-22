@@ -12,10 +12,13 @@
 -- This module supplies a high level abstraction of the rather
 -- low-level blas-hs interfaces.
 ------------------------------------------------------------
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Data.NeuralNetwork.Backend.BLASHS.Utils (
   DenseVector(..),
   DenseMatrix(..),
   DenseMatrixArray(..),
+  Scalar(..),
+  WithVar(..),
   newDenseVector,
   newDenseVectorCopy,
   newDenseVectorConst,
@@ -54,6 +57,7 @@ import Foreign.Marshal.Array (advancePtr)
 import Text.Printf (printf, PrintfArg)
 import qualified Text.PrettyPrint.Free as P
 import System.IO.Unsafe (unsafePerformIO)
+import Data.NeuralNetwork.Common (OptVar)
 import Data.NeuralNetwork.Backend.BLASHS.SIMD
 
 -- | mutable vector type
@@ -64,6 +68,10 @@ data DenseMatrix a = DenseMatrix {-# UNPACK #-}!Int {-# UNPACK #-}!Int {-# UNPAC
 
 -- | array of DenseMatrix, which are identical in size.
 data DenseMatrixArray a = DenseMatrixArray {-# UNPACK #-}!Int {-# UNPACK #-}!Int {-# UNPACK #-}!Int {-# UNPACK #-}!(V.IOVector a)
+
+newtype Scalar a = Scalar { unScalar :: a} deriving (Num, Fractional)
+
+data WithVar t o p = WithVar { _parm :: t p, _ovar :: OptVar o (t p)}
 
 -- | create a new 'DenseVector'
 newDenseVector :: (V.Storable a, MonadIO m) => Int -> m (DenseVector a)
@@ -223,6 +231,10 @@ instance V.Storable a => Size (DenseMatrix a) where
 instance V.Storable a => Size (DenseMatrixArray a) where
   type Dim (DenseMatrixArray a) = (Int,Int,Int)
   size (DenseMatrixArray n r c v) = assert (V.length v >= n * r * c) $ (n,r,c)
+
+instance Size (t p) => Size (WithVar t o p) where
+  type Dim (WithVar t o p) = Dim (t p)
+  size a = size (_parm a)
 
 infix 4 :<#, :#>, :<>, :##, :.*, :.+
 infix 0 <<=, <<+

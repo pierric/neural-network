@@ -29,13 +29,21 @@ module Data.NeuralNetwork.Common(
   SpecFlow(..),
   SpecMeanPooling(..),
   SpecEvaluator(..),
-  HVect((:&:),HNil)
+  HVect((:&:),HNil),
+  OptVar,
+  Optimizer(..),
 ) where
 
 import Control.Monad.Except (MonadError)
 import GHC.Float (double2Float, float2Double)
 import Data.Data
 import Data.HVect
+
+data OptVar opt grad = OptVar opt [grad]
+
+class Optimizer a where
+  newOptVar :: a -> b -> IO (OptVar a b)
+  optimize :: OptVar a b -> b -> IO b
 
 class (Fractional a, Ord a) => RealType a where
   fromDouble :: Double -> a
@@ -83,8 +91,8 @@ instance BodySize a => BodySize (SpecFlow a) where
 
 -- translate the body of specification
 class MonadError ErrCode m => BodyTrans m b s where
-  type SpecToCom b s
-  btrans :: b -> LayerSize -> s -> m (SpecToCom b s)
+  type SpecToCom b o s
+  btrans :: Optimizer o => b -> LayerSize -> s -> o -> m (SpecToCom b o s)
 
 class (MonadError ErrCode m) => EvalTrans m b c s where
   type SpecToEvl b c s

@@ -63,9 +63,9 @@ instance (Component a, Component b,
     !trb <- forwardT b (output tra)
     return $ S0Trace (trb, tra)
   output (S0Trace !a) = output (fst a)
-  backward (Stack a b) (S0Trace (!trb,!tra)) !odeltb rate = do
-    (b', !odelta) <- backward b trb odeltb rate
-    (a', !idelta) <- backward a tra odelta rate
+  backward (Stack a b) (S0Trace (!trb,!tra)) !odeltb = do
+    (b', !odelta) <- backward b trb odeltb
+    (a', !idelta) <- backward a tra odelta
     return (Stack a' b', idelta)
 
 instance (Component a, Component b,
@@ -83,9 +83,9 @@ instance (Component a, Component b,
     !trb <- lift $ forwardT b (output tra)
     return $ S1Trace (trb, tra)
   output (S1Trace !a) = output (fst a)
-  backward (Stack a b) (S1Trace (!trb,!tra)) !odeltb rate = do
-    (b', !odelta) <- lift $ backward b trb odeltb rate
-    (a', !idelta) <- backward a tra odelta rate
+  backward (Stack a b) (S1Trace (!trb,!tra)) !odeltb = do
+    (b', !odelta) <- lift $ backward b trb odeltb
+    (a', !idelta) <- backward a tra odelta
     return (Stack a' b', idelta)
 
 instance (Component a, Component b,
@@ -103,32 +103,32 @@ instance (Component a, Component b,
     !trb <- forwardT b (output tra)
     return $ S2Trace (trb, tra)
   output (S2Trace !a) = output (fst a)
-  backward (Stack a b) (S2Trace (!trb,!tra)) !odeltb rate = do
-    (b', !odelta) <- backward b trb odeltb rate
-    (a', !idelta) <- lift $ backward a tra odelta rate
+  backward (Stack a b) (S2Trace (!trb,!tra)) !odeltb = do
+    (b', !odelta) <- backward b trb odeltb
+    (a', !idelta) <- lift $ backward a tra odelta
     return (Stack a' b', idelta)
 
 -- internal type class to do induction on a non-empty hvect
 class HVectStackable m k a b where
-  type HVectSpecToCom k a b
-  hvectTrans :: k -> LayerSize -> HVect (a ': b) -> m (HVectSpecToCom k a b)
+  type HVectSpecToCom k o a b
+  hvectTrans :: Optimizer o => k -> LayerSize -> HVect (a ': b) -> o -> m (HVectSpecToCom k o a b)
 
 instance BodyTrans m k a => HVectStackable m k a '[] where
-  type HVectSpecToCom k a '[] = SpecToCom k a
-  hvectTrans bk sz (a :&: HNil) = btrans bk sz a
+  type HVectSpecToCom k o a '[] = SpecToCom k o a
+  hvectTrans bk sz (a :&: HNil) o = btrans bk sz a o
 
 instance (BodyTrans m k a, BodySize a, HVectStackable m k b c) => HVectStackable m k a (b ': c) where
-  type HVectSpecToCom k a (b ': c) = Stack (SpecToCom k a) (HVectSpecToCom k b c) (LiftRun (Run (SpecToCom k a)) (Run (HVectSpecToCom k b c)))
-  hvectTrans bk sz (a :&: bc) = do c0 <- btrans bk sz a
-                                   cs <- hvectTrans bk (bsize sz a) bc
-                                   return (Stack c0 cs)
+  type HVectSpecToCom k o a (b ': c) = Stack (SpecToCom k o a) (HVectSpecToCom k o b c) (LiftRun (Run (SpecToCom k o a)) (Run (HVectSpecToCom k o b c)))
+  hvectTrans bk sz (a :&: bc) o = do c0 <- btrans bk sz a o
+                                     cs <- hvectTrans bk (bsize sz a) bc o
+                                     return (Stack c0 cs)
 
 instance (MonadError ErrCode m, HVectStackable m k s0 ss) => BodyTrans m k (HVect (s0 ': ss)) where
-  type SpecToCom k (HVect (s0 ': ss)) = HVectSpecToCom k s0 ss
-  btrans bk sz spec = hvectTrans bk sz spec
+  type SpecToCom k o (HVect (s0 ': ss)) = HVectSpecToCom k o s0 ss
+  btrans bk sz spec o = hvectTrans bk sz spec o
 
 instance MonadError ErrCode m => BodyTrans m k (HVect '[]) where
-  type SpecToCom k (HVect '[]) = TypeError (Text "HVect '[] is not a valid specification of Neural Network")
+  type SpecToCom k o (HVect '[]) = TypeError (Text "HVect '[] is not a valid specification of Neural Network")
 
 class HVectSize a b where
   hvectSize  :: LayerSize -> HVect (a ': b) -> LayerSize

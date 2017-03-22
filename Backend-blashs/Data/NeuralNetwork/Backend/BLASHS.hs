@@ -47,8 +47,8 @@ byBLASHSf = ByBLASHS
 byBLASHSd :: ByBLASHS Double
 byBLASHSd = ByBLASHS
 
-type AbbrSpecToCom p s   = SpecToCom (ByBLASHS p) s
-type AbbrSpecToEvl p s o = SpecToEvl (ByBLASHS p) (AbbrSpecToCom p s) o
+type AbbrSpecToCom p s o   = SpecToCom (ByBLASHS p) o s
+type AbbrSpecToEvl p s o v = SpecToEvl (ByBLASHS p) (AbbrSpecToCom p o s) v
 
 -- | Neural network specified to start with 1D / 2D input
 instance (InputLayer i, RealType p,
@@ -70,23 +70,23 @@ instance RunInEnv IO Err where
 instance (Numeric p, RealType p, SIMDable p) => BodyTrans Err (ByBLASHS p) SpecFullConnect where
   -- 'SpecFullConnect' is translated to a two-layer component
   -- a full-connect, followed by a relu activation (1D, single channel)
-  type SpecToCom (ByBLASHS p) SpecFullConnect = Stack (RunLayer p F) (RunLayer p (T SinglVec)) CE
+  type SpecToCom (ByBLASHS p) o SpecFullConnect = Stack (FullConn o p) (ActivateS p) CE
   btrans _ (D1 s) (FullConnect n) = do u <- lift $ newFLayer s n
-                                       return $ Stack u (Activation (relu, relu'))
+                                       return $ Stack u (ActivateS (relu, relu'))
   btrans _ _ _ = throwError ErrMismatch
 
 instance (Numeric p, RealType p, SIMDable p) => BodyTrans Err (ByBLASHS p) SpecConvolution where
   -- 'SpecConvolution' is translated to a two-layer component
   -- a convolution, following by a relu activation (2D, multiple channels)
-  type SpecToCom (ByBLASHS p) SpecConvolution = Stack (RunLayer p C) (RunLayer p (T MultiMat)) CE
+  type SpecToCom (ByBLASHS p) o SpecConvolution = Stack (Convolute o p) (ActivateM p) CE
   btrans _ (D2 k s t) (Convolution n f p) = do u <- lift $ newCLayer k n f p
-                                               return $ Stack u (Activation (relu, relu'))
+                                               return $ Stack u (ActivateM (relu, relu'))
   btrans _ _ _ = throwError ErrMismatch
 
 instance (Numeric p, RealType p, SIMDable p) => BodyTrans Err (ByBLASHS p) SpecMaxPooling where
   -- 'MaxPooling' is translated to a max-pooling component.
-  type SpecToCom (ByBLASHS p) SpecMaxPooling = RunLayer p P
-  btrans _ (D2 _ _ _) (MaxPooling n) = return (MaxP n)
+  type SpecToCom (ByBLASHS p) o SpecMaxPooling = MaxPool p
+  btrans _ (D2 _ _ _) (MaxPooling n) = return (MaxPool n)
   btrans _ _ _ = throwError ErrMismatch
 
 instance (Numeric p, RealType p, SIMDable p) => BodyTrans Err (ByBLASHS p) SpecReshape2DAs1D where
@@ -97,9 +97,9 @@ instance (Numeric p, RealType p, SIMDable p) => BodyTrans Err (ByBLASHS p) SpecR
 
 instance (Numeric p, RealType p, SIMDable p) => BodyTrans Err (ByBLASHS p) SpecLSTM where
   -- 'SpecLSTM' is translated to a LSTM component.
-  type SpecToCom (ByBLASHS p) SpecLSTM = Stack (LSTM p) (RunLayer p (T SinglVec)) (LiftRun (Run (LSTM p)) (Run (RunLayer p (T SinglVec))))
+  type SpecToCom (ByBLASHS p) o SpecLSTM = Stack (LSTM o p) (ActivateS p) (LiftRun (Run (LSTM o p)) (Run (ActivateS p)))
   btrans _ (D1 s) (LSTM n) = do u <- lift $ newLSTM s n
-                                return $ Stack u (Activation (relu, relu'))
+                                return $ Stack u (ActivateS (relu, relu'))
   btrans _ _ _ = throwError ErrMismatch
 
 instance (BodyTrans Err (ByBLASHS p) a) => BodyTrans Err (ByBLASHS p) (SpecFlow a) where

@@ -45,7 +45,7 @@ class Component a where
   -- | extract the output value from the trace
   output   :: Trace a -> Out a
   -- | Backward propagation
-  backward :: a -> Trace a -> Out a -> Float -> Run a (a, Inp a)
+  backward :: a -> Trace a -> Out a -> Run a (a, Inp a)
 
 class Monad m => Evaluator m a where
   type Val a
@@ -60,13 +60,12 @@ type BackendCst e a b = (ModelCst a b, RunInEnv (Run a) e)
 learn :: (ModelCst n e)
       => (n,e)                              -- ^ neuron network
       -> (Inp n, Val e)                     -- ^ input and expect output
-      -> Float                              -- ^ learning rate
       -> Run n (n,e)                        -- ^ updated network
-learn (n,e) (i,o) rate = do
+learn (n,e) (i,o) = do
     tr <- forwardT n i
     o' <- eval e (output tr)
     er <- cost e o' o
-    n' <- fst <$> backward n tr er rate
+    n' <- fst <$> backward n tr er
     return (n', e)
 
 -- | Abstraction of backend to carry out the specification
@@ -80,7 +79,7 @@ class Backend b s where
   witness :: b -> s -> Dict ( Monad (Env b)
                             , BackendCst (Env b) (ComponentFromSpec b s) (EvaluatorFromSpec b s))
   -- | compile the specification to runnable component.
-  compile :: b -> s -> Env b ((ComponentFromSpec b s), (EvaluatorFromSpec b s))
+  compile :: Optimizer o => b -> s -> o -> Env b ((ComponentFromSpec b s), (EvaluatorFromSpec b s))
 
 -- | Lifting from one monad to another.
 -- It is not necessary that the 'Env' and 'Run' maps to the

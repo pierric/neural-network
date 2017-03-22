@@ -36,18 +36,19 @@ import System.Random.MWC.Distributions
 import Data.Vector.Storable (Storable)
 import qualified Text.PrettyPrint.Free as P
 
-type VecR p = DenseVector p
-type MatR p = DenseMatrix p
+type VecR = DenseVector
+type MatR = DenseMatrix
+
 type LSTMident = Int
 
-data LSTM p = LLSTM { parm_w_f :: MatR p, parm_w_i :: MatR p, parm_w_o :: MatR p, parm_w_c :: MatR p
-                    , parm_u_f :: MatR p, parm_u_i :: MatR p, parm_u_o :: MatR p
-                    , parm_b_f :: VecR p, parm_b_i :: VecR p, parm_b_o :: VecR p, parm_b_c :: VecR p
-                    , lstm_id  :: LSTMident, lstm_isize, lstm_osize :: Int
-                    }
+data LSTM o p = LLSTM { parm_w_f, parm_w_i, parm_w_o, parm_w_c, parm_u_f, parm_u_i, parm_u_o :: WithVar MatR o p
+                      , parm_b_f, parm_b_i, parm_b_o, parm_b_c :: WithVar VecR o p
+                      , lstm_id  :: LSTMident, lstm_isize, lstm_osize :: Int
+                      }
   deriving Typeable
 
-instance Data p => Data (LSTM p) where
+
+instance (Data o, Data p) => Data (LSTM o p) where
   toConstr a = lstmConstr
   gfoldl f z a = z (\i->a{lstm_id=i}) `f` (lstm_id a)
   gunfold k z c = errorWithoutStackTrace "Data.Data.gunfold(LSTM)"
@@ -59,17 +60,24 @@ lstmDataType = mkDataType "Data.NeuralNetwork.Backend.BLASHS.LSTM.LSTM" [lstmCon
 global_LSTM_id_counter :: IORef Int
 global_LSTM_id_counter = unsafePerformIO (newIORef 0)
 -- | create a new LSTM component
-newLSTM :: (Numeric p, RealType p, SIMDable p)
+newLSTM :: (Numeric p, RealType p, SIMDable p, Optimizer o)
         => Int        -- ^ input size
         -> Int        -- ^ output size
-        -> IO (LSTM p)-- ^ the new layer
-newLSTM m n =
+        -> o
+        -> IO (LSTM o p) -- ^ the new layer
+newLSTM m n opt =
   withSystemRandom . asGenIO $ \gen -> do
     let newW v = do raw <- newDenseVectorByGen (fromDouble <$> normal 0 v gen) (m*n)
-                    return $ v2m m n raw
+                    let mw = v2m m n raw
+                    ov  <- newOptVar opt mw
+                    return $ WithVar mw ov
         newU v = do raw <- newDenseVectorByGen (fromDouble <$> normal 0 v gen) (n*n)
-                    return $ v2m n n raw
-        newB v = newDenseVectorConst n v
+                    let mu = v2m n n raw
+                    ov  <- newOptVar opt mu
+                    return $ WithVar mu ov
+        newB v = do vb  <- newDenseVectorConst n v
+                    ov  <- newOptVar opt vb
+                    return $ WithVar vb ov
     parm_w_f <- newW 0.01
     parm_w_i <- newW 0.01
     parm_w_o <- newW 0.01
@@ -112,43 +120,43 @@ type LSTMstreamInfo p = Either (LSTMstreamPrev p) (LSTMstreamNext p)
 
 type LSTM_Env_Transformer p = StateT (M.Map LSTMident (LSTMstreamInfo p))
 
-instance (Numeric p, RealType p, SIMDable p) => Component (LSTM p) where
+instance (Numeric p, RealType p, SIMDable p, Optimizer o) => Component (LSTM o p) where
   -- The state is mapping from LSTM identifier to Info.
   -- So when mutiple LSTM compoents are stacked, each can
   -- access its own state.
-  type Dty (LSTM p) = p
-  type Run (LSTM p) = LSTM_Env_Transformer p IO
-  type Inp (LSTM p) = VecR p
-  type Out (LSTM p) = VecR p
-  data Trace (LSTM p) = LTrace { tr_mf, tr_mi, tr_mo, tr_n, tr_f, tr_i, tr_o, tr_c', tr_c, tr_inp, tr_out :: VecR p }
+  type Dty (LSTM o p) = p
+  type Run (LSTM o p) = LSTM_Env_Transformer p IO
+  type Inp (LSTM o p) = VecR p
+  type Out (LSTM o p) = VecR p
+  data Trace (LSTM o p) = LTrace { tr_mf, tr_mi, tr_mo, tr_n, tr_f, tr_i, tr_o, tr_c', tr_c, tr_inp, tr_out :: VecR p }
   forwardT lstm x_t = do
     Just (Left c_tm1) <- gets (M.lookup $ lstm_id lstm)
 
     let osize = lstm_osize lstm
     mf_t  <- newDenseVector osize
-    mf_t <<= x_t   :<# parm_w_f lstm
-    mf_t <<+ c_tm1 :<# parm_u_f lstm
-    mf_t <<= mf_t  :.+ parm_b_f lstm
+    mf_t <<= x_t   :<# _parm (parm_w_f lstm)
+    mf_t <<+ c_tm1 :<# _parm (parm_u_f lstm)
+    mf_t <<= mf_t  :.+ _parm (parm_b_f lstm)
     f_t   <- newDenseVectorCopy mf_t
     f_t  <<= Apply sigma
 
     mi_t <- newDenseVector osize
-    mi_t <<= x_t   :<# parm_w_i lstm
-    mi_t <<+ c_tm1 :<# parm_u_i lstm
-    mi_t <<= mi_t  :.+ parm_b_i lstm
+    mi_t <<= x_t   :<# _parm (parm_w_i lstm)
+    mi_t <<+ c_tm1 :<# _parm (parm_u_i lstm)
+    mi_t <<= mi_t  :.+ _parm (parm_b_i lstm)
     i_t   <- newDenseVectorCopy mi_t
     i_t  <<= Apply sigma
 
     mo_t <- newDenseVector osize
-    mo_t <<= x_t   :<# parm_w_o lstm
-    mo_t <<+ c_tm1 :<# parm_u_o lstm
-    mo_t <<= mo_t  :.+ parm_b_o lstm
+    mo_t <<= x_t   :<# _parm (parm_w_o lstm)
+    mo_t <<+ c_tm1 :<# _parm (parm_u_o lstm)
+    mo_t <<= mo_t  :.+ _parm (parm_b_o lstm)
     o_t   <- newDenseVectorCopy mo_t
     o_t  <<= Apply sigma
 
     n_t  <- newDenseVector osize
-    n_t  <<= x_t :<# parm_w_c lstm
-    n_t  <<= n_t :.+ parm_b_c lstm
+    n_t  <<= x_t :<# _parm (parm_w_c lstm)
+    n_t  <<= n_t :.+ _parm (parm_b_c lstm)
 
     c_t   <- newDenseVector osize
     c_t  <<= c_tm1 :.* f_t
@@ -173,7 +181,7 @@ instance (Numeric p, RealType p, SIMDable p) => Component (LSTM p) where
 
   output = tr_out
 
-  backward lstm trace !delta_out rate = do
+  backward lstm trace !delta_out = do
     Just (Right upward) <- gets (M.lookup $ lstm_id lstm)
 
     (delta_ct, ori_uf, ori_ui, ori_uo) <- case upward of
@@ -185,9 +193,9 @@ instance (Numeric p, RealType p, SIMDable p) => Component (LSTM p) where
 
                     -- the original Ui, Uf, Uo are used in calc delta_ct,
                     -- so save a copy in state.
-                    ori_uf <- newDenseMatrixCopy (parm_u_f lstm)
-                    ori_ui <- newDenseMatrixCopy (parm_u_i lstm)
-                    ori_uo <- newDenseMatrixCopy (parm_u_o lstm)
+                    ori_uf <- newDenseMatrixCopy (_parm $ parm_u_f lstm)
+                    ori_ui <- newDenseMatrixCopy (_parm $ parm_u_i lstm)
+                    ori_uo <- newDenseMatrixCopy (_parm $ parm_u_o lstm)
                     return (tmp, ori_uf, ori_ui, ori_uo)
                   nx -> do
                     tmp <- newDenseVectorCopy (tr_c trace)
@@ -248,44 +256,45 @@ instance (Numeric p, RealType p, SIMDable p) => Component (LSTM p) where
     delta_bo <<= Apply sigma'
     delta_bo <<= delta_bo :.* delta_ot
 
-    delta_wc <- uncurry newDenseMatrix (size (parm_w_c lstm))
+    let mat_size = (lstm_isize lstm, lstm_osize lstm)
+    delta_wc <- uncurry newDenseMatrix mat_size
     tmp <- newDenseVectorCopy (tr_n trace)
     tmp <<= Apply sigma'
     tmp <<= tmp :.* tr_i trace
     tmp <<= tmp :.* delta_ct
     delta_wc <<+ tr_inp trace :## tmp
 
-    delta_wf <- uncurry newDenseMatrix (size (parm_w_f lstm))
+    delta_wf <- uncurry newDenseMatrix mat_size
     denseVectorCopy tmp (tr_mf trace)
     tmp <<= Apply sigma'
     tmp <<= tmp :.* delta_ft
     delta_wf <<+ tr_inp trace :## tmp
 
-    delta_wi <- uncurry newDenseMatrix (size (parm_w_i lstm))
+    delta_wi <- uncurry newDenseMatrix mat_size
     denseVectorCopy tmp (tr_mi trace)
     tmp <<= Apply sigma'
     tmp <<= tmp :.* delta_it
     delta_wi <<+ tr_inp trace :## tmp
 
-    delta_wo <- uncurry newDenseMatrix (size (parm_w_o lstm))
+    delta_wo <- uncurry newDenseMatrix mat_size
     denseVectorCopy tmp (tr_mo trace)
     tmp <<= Apply sigma'
     tmp <<= tmp :.* delta_ot
     delta_wo <<+ tr_inp trace :## tmp
 
-    delta_uf <- uncurry newDenseMatrix (size (parm_u_f lstm))
+    delta_uf <- uncurry newDenseMatrix mat_size
     denseVectorCopy tmp (tr_mf trace)
     tmp <<= Apply sigma'
     tmp <<= tmp :.* delta_ft
     delta_uf <<+ tr_c' trace :## tmp
 
-    delta_ui <- uncurry newDenseMatrix (size (parm_u_i lstm))
+    delta_ui <- uncurry newDenseMatrix mat_size
     denseVectorCopy tmp (tr_mi trace)
     tmp <<= Apply sigma'
     tmp <<= tmp :.* delta_it
     delta_ui <<+ tr_c' trace :## tmp
 
-    delta_uo <- uncurry newDenseMatrix (size (parm_u_o lstm))
+    delta_uo <- uncurry newDenseMatrix mat_size
     denseVectorCopy tmp (tr_mo trace)
     tmp <<= Apply sigma'
     tmp <<= tmp :.* delta_ot
@@ -295,47 +304,35 @@ instance (Numeric p, RealType p, SIMDable p) => Component (LSTM p) where
     tmp <- newDenseVectorCopy (tr_mf trace)
     tmp <<= Apply sigma'
     tmp <<= tmp :.* delta_ft
-    delta_inp <<= parm_w_f lstm :#> tmp
+    delta_inp <<= _parm (parm_w_f lstm) :#> tmp
 
     denseVectorCopy tmp (tr_mi trace)
     tmp <<= Apply sigma'
     tmp <<= tmp :.* delta_it
-    delta_inp <<+ parm_w_i lstm :#> tmp
+    delta_inp <<+ _parm (parm_w_i lstm) :#> tmp
 
     denseVectorCopy tmp (tr_mo trace)
     tmp <<= Apply sigma'
     tmp <<= tmp :.* delta_ot
-    delta_inp <<+ parm_w_o lstm :#> tmp
+    delta_inp <<+ _parm (parm_w_o lstm) :#> tmp
 
     denseVectorCopy tmp (tr_n trace)
     tmp <<= Apply sigma'
     tmp <<= tmp :.* tr_i trace
     tmp <<= tmp :.* delta_ct
-    delta_inp <<+ parm_w_c lstm :#> tmp
+    delta_inp <<+ _parm (parm_w_c lstm) :#> tmp
 
-    let rate' = fromFloat rate
-    delta_bc <<= Scale rate'
-    parm_b_c lstm <<= parm_b_c lstm :.+ delta_bc
-    delta_bf <<= Scale rate'
-    parm_b_f lstm <<= parm_b_f lstm :.+ delta_bf
-    delta_bi <<= Scale rate'
-    parm_b_i lstm <<= parm_b_i lstm :.+ delta_bi
-    delta_bo <<= Scale rate'
-    parm_b_o lstm <<= parm_b_o lstm :.+ delta_bo
-    delta_wc <<= Scale rate'
-    parm_w_c lstm <<= parm_w_c lstm :.+ delta_wc
-    delta_wf <<= Scale rate'
-    parm_w_f lstm <<= parm_w_f lstm :.+ delta_wf
-    delta_wi <<= Scale rate'
-    parm_w_i lstm <<= parm_w_i lstm :.+ delta_wi
-    delta_wo <<= Scale rate'
-    parm_w_o lstm <<= parm_w_o lstm :.+ delta_wo
-    delta_uf <<= Scale rate'
-    parm_u_f lstm <<= parm_u_f lstm :.+ delta_uf
-    delta_ui <<= Scale rate'
-    parm_u_i lstm <<= parm_u_i lstm :.+ delta_ui
-    delta_uo <<= Scale rate'
-    parm_u_o lstm <<= parm_u_o lstm :.+ delta_uo
+    let parms = [parm_b_c,parm_b_f,parm_b_i,parm_b_o]
+        upds  = [delta_bc,delta_bf,delta_bi,delta_bo]
+    forM_ (zip parms upds) $ \(p, u) -> do
+      u <- liftIO $ optimize (_ovar $ p lstm) u
+      _parm (p lstm) <<= _parm (p lstm) :.+ u
+
+    let parms = [parm_w_c,parm_w_f,parm_w_i,parm_w_o,parm_u_f,parm_u_i,parm_u_o]
+        upds  = [delta_wc,delta_wf,delta_wi,delta_wo,delta_uf,delta_ui,delta_uo]
+    forM_ (zip parms upds) $ \(p, u) -> do
+      u <- liftIO $ optimize (_ovar $ p lstm) u
+      _parm (p lstm) <<= _parm (p lstm) :.+ u
 
     modify $ M.insert (lstm_id lstm)
               (Right $ NextJust {
@@ -353,40 +350,40 @@ instance (Numeric p, RealType p, SIMDable p) => Component (LSTM p) where
               })
     return (lstm, delta_inp)
 
-newtype Stream a = Stream a
+newtype Stream o a = Stream a
   deriving (Typeable, Data)
 
-instance (Data a, Component a,
+instance (Data a, Component a, Data o, Optimizer o,
           Inp a ~ VecR (Dty a),
           Typeable (Dty a), Numeric (Dty a), RealType (Dty a), SIMDable (Dty a),
-          Run a ~ Run (LSTM (Dty a))) => Component (Stream a) where
-  type Dty (Stream a) = Dty a
-  type Run (Stream a) = IO
-  type Inp (Stream a) = [Inp a]
-  type Out (Stream a) = [Out a]
-  newtype Trace (Stream a) = StreamTrace [Trace a]
-  forwardT (Stream c) xs = do
+          Run a ~ LSTM_Env_Transformer (Dty a) IO) => Component (Stream o a) where
+  type Dty (Stream o a) = Dty a
+  type Run (Stream o a) = IO
+  type Inp (Stream o a) = [Inp a]
+  type Out (Stream o a) = [Out a]
+  newtype Trace (Stream o a) = StreamTrace [Trace a]
+  forwardT s@(Stream c) xs = do
     -- set initial state for all LSTMs
-    st <- forM (collectLSTMs c) (\lstm -> do
+    st <- forM (collectLSTMs s) (\lstm -> do
             vec <- newDenseVector (lstm_osize lstm)
             return (lstm_id lstm, Left vec))
     -- forward each input one by one, where the state is implicitly propagated.
     trs <- flip evalStateT (M.fromList st) (mapM (forwardT c) xs)
     return $ StreamTrace trs
   output (StreamTrace trace) = map output trace
-  backward (Stream c) (StreamTrace trace) delta_out rate = do
+  backward s@(Stream c) (StreamTrace trace) delta_out = do
     -- set initial state for all LSTMs
-    st <- forM (collectLSTMs c) (\lstm ->
+    st <- forM (collectLSTMs s) (\lstm ->
             return (lstm_id lstm, Right NextNothing))
     -- backward for each input one by one, and accumulate all updates
     (c, delta_inp) <- flip evalStateT (M.fromList st) $ foldrM step (c, []) (zip trace delta_out)
     return (Stream c, delta_inp)
     where
       step (tr,dout) (c,ds) = do
-        (c', di) <- backward c tr dout rate
+        (c', di) <- backward c tr dout
         return (c', di:ds)
 
-collectLSTMs :: (Data a, Component a, Typeable (Dty a)) => a -> [LSTM (Dty a)]
+collectLSTMs :: (Data a, Typeable (Dty a), Data o) => Stream o a -> [LSTM o (Dty a)]
 collectLSTMs = everything (++) ([] `mkQ` isLSTM)
   where
     isLSTM a@(LLSTM{}) = [a]
