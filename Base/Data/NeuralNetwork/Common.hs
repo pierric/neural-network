@@ -12,12 +12,18 @@
 -- This module defines common interfaces for backends
 ------------------------------------------------------------
 {-# LANGUAGE DataKinds, TypeOperators #-}
+{-# LANGUAGE ConstraintKinds          #-}
 module Data.NeuralNetwork.Common(
   RealType(..),
   LayerSize(..),
   InputLayer(..),
-  BodySize(..), BodyTrans(..), EvalTrans(..),
+  BodySize(..), BodyTrans(..),
+  Component(..),
+  Evaluator(..),
   ErrCode(..),
+  Backend(..),
+  RunInEnv(..),
+  ModelCst, BackendCst,
   SpecIn1D(..),
   SpecIn2D(..),
   SpecInStream(..),
@@ -35,7 +41,9 @@ module Data.NeuralNetwork.Common(
 ) where
 
 import Control.Monad.Except (MonadError)
+import Control.Monad.Trans (MonadIO)
 import GHC.Float (double2Float, float2Double)
+import Data.Constraint (Dict(..))
 import Data.Data
 import Data.HVect
 
@@ -89,16 +97,64 @@ instance BodySize a => BodySize (SpecFlow a) where
   bsize (SV sz) (Flow a) = SV (bsize sz a)
   bsize (SF n sz) (Flow a) = SF n (bsize sz a)
 
--- translate the body of specification
-class MonadError ErrCode m => BodyTrans m b s where
-  type SpecToCom b o s
-  btrans :: Optimizer o => b -> LayerSize -> s -> o -> m (SpecToCom b o s)
+-- | Abstraction of a neural network component
+class Component a where
+  type Dty a :: *
+  -- | execution environment
+  type Run a :: * -> *
+  -- | the type of input and in-error
+  type Inp a
+  -- | the type of output and out-error
+  type Out a
+  -- | the trace of a forward propagation
+  data Trace a
+  -- | Forward propagation
+  forwardT :: a -> Inp a -> Run a (Trace a)
+  -- | Forward propagation
+  forward  :: Applicative (Run a) => a -> Inp a -> Run a (Out a)
+  forward a = (output <$>) . forwardT a
+  -- | extract the output value from the trace
+  output   :: Trace a -> Out a
+  -- | Backward propagation
+  backward :: a -> Trace a -> Out a -> Run a (a, Inp a)
 
-class (MonadError ErrCode m) => EvalTrans m b c s where
-  type SpecToEvl b c s
-  etrans :: b -> c -> s -> m (SpecToEvl b c s)
+class Evaluator a where
+  type Val a
+  eval :: a -> Val a -> IO (Val a)
+  cost :: a -> Val a -> Val a -> IO (Val a)
+
+-- translate the body of specification
+class MonadError ErrCode (Env b) => BodyTrans b s where
+  type SpecToCom b s o
+  btrans   :: Optimizer o => b -> LayerSize -> s -> o -> Env b (SpecToCom b s o)
+  bwitness :: Optimizer o => b -> s -> o -> Dict (Component (SpecToCom b s o), RunInEnv (Run (SpecToCom b s o)) (Env b))
 
 data ErrCode = ErrMismatch
+
+type ModelCst   a b   = (Component a, MonadIO (Run a), Evaluator b, Out a ~ Val b)
+type BackendCst e a b = (ModelCst a b, RunInEnv (Run a) e)
+
+-- | Abstraction of backend to carry out the specification
+class Backend b s where
+  -- | environment to 'compile' the specification
+  type Env b :: * -> *
+  -- | result type of 'compile'
+  type ComponentFromSpec b s o
+  type EvaluatorFromSpec b s o
+  -- | necessary constraints of the resulting type
+  witness :: (Optimizer o, Out (ComponentFromSpec b s o) ~ Val (EvaluatorFromSpec b s o)) =>
+             b -> s -> o -> Dict ( Monad (Env b)
+                                 , BackendCst (Env b) (ComponentFromSpec b s o) (EvaluatorFromSpec b s o))
+  -- | compile the specification to runnable component.
+  compile :: Optimizer o =>
+             b -> s -> o -> Env b ((ComponentFromSpec b s o), (EvaluatorFromSpec b s o))
+
+-- | Lifting from one monad to another.
+-- It is not necessary that the 'Env' and 'Run' maps to the
+-- same execution environment, but the 'Run' one should be
+-- able to be lifted to 'Env' one.
+class (Monad r, Monad e) => RunInEnv r e where
+  run :: r a -> e a
 
 {--
 We can improve the predefined specifications by a feature like

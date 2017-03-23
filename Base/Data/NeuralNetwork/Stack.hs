@@ -109,26 +109,26 @@ instance (Component a, Component b,
     return (Stack a' b', idelta)
 
 -- internal type class to do induction on a non-empty hvect
-class HVectStackable m k a b where
-  type HVectSpecToCom k o a b
-  hvectTrans :: Optimizer o => k -> LayerSize -> HVect (a ': b) -> o -> m (HVectSpecToCom k o a b)
+class MonadError ErrCode (Env k) => HVectStackable k a b where
+  type HVectSpecToCom k a b o
+  hvectTrans :: Optimizer o => k -> LayerSize -> HVect (a ': b) -> o -> Env k (HVectSpecToCom k a b o)
 
-instance BodyTrans m k a => HVectStackable m k a '[] where
-  type HVectSpecToCom k o a '[] = SpecToCom k o a
+instance BodyTrans k a => HVectStackable k a '[] where
+  type HVectSpecToCom k a '[] o = SpecToCom k a o
   hvectTrans bk sz (a :&: HNil) o = btrans bk sz a o
 
-instance (BodyTrans m k a, BodySize a, HVectStackable m k b c) => HVectStackable m k a (b ': c) where
-  type HVectSpecToCom k o a (b ': c) = Stack (SpecToCom k o a) (HVectSpecToCom k o b c) (LiftRun (Run (SpecToCom k o a)) (Run (HVectSpecToCom k o b c)))
+instance (BodyTrans k a, BodySize a, HVectStackable k b c) => HVectStackable k a (b ': c) where
+  type HVectSpecToCom k a (b ': c) o = Stack (SpecToCom k a o) (HVectSpecToCom k b c o) (LiftRun (Run (SpecToCom k a o)) (Run (HVectSpecToCom k b c o)))
   hvectTrans bk sz (a :&: bc) o = do c0 <- btrans bk sz a o
                                      cs <- hvectTrans bk (bsize sz a) bc o
                                      return (Stack c0 cs)
 
-instance (MonadError ErrCode m, HVectStackable m k s0 ss) => BodyTrans m k (HVect (s0 ': ss)) where
-  type SpecToCom k o (HVect (s0 ': ss)) = HVectSpecToCom k o s0 ss
+instance HVectStackable k s0 ss => BodyTrans k (HVect (s0 ': ss)) where
+  type SpecToCom k (HVect (s0 ': ss)) o = HVectSpecToCom k s0 ss o
   btrans bk sz spec o = hvectTrans bk sz spec o
 
-instance MonadError ErrCode m => BodyTrans m k (HVect '[]) where
-  type SpecToCom k o (HVect '[]) = TypeError (Text "HVect '[] is not a valid specification of Neural Network")
+instance MonadError ErrCode (Env k) => BodyTrans k (HVect '[]) where
+  type SpecToCom k (HVect '[]) o = TypeError (Text "HVect '[] is not a valid specification of Neural Network")
 
 class HVectSize a b where
   hvectSize  :: LayerSize -> HVect (a ': b) -> LayerSize

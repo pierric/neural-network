@@ -23,15 +23,15 @@ import Data.NeuralNetwork.Backend.BLASHS.SIMD
 import Control.Monad.Trans (MonadIO)
 import Blas.Generic.Unsafe (Numeric)
 
-data Eval (m :: * -> *) p = Eval SpecEvaluator
+data Eval p = Eval SpecEvaluator
 
 mse_eval x   = return x
 mse_cost x y = do v <- newDenseVector (size x)
                   v <<= ZipWith cost' x y
                   return v
 
-instance (MonadIO m, SIMDable p, Numeric p) => Evaluator m (Eval m p) where
-  type Val (Eval m p) = DenseVector p
+instance (SIMDable p, Numeric p) => Evaluator (Eval p) where
+  type Val (Eval p) = DenseVector p
   eval (Eval MeanSquaredError)    = mse_eval
   eval (Eval SoftmaxCrossEntropy) = error ""
   cost (Eval MeanSquaredError)    = mse_cost
