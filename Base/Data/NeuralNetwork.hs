@@ -18,14 +18,15 @@ module Data.NeuralNetwork (
 ) where
 
 import Control.Monad.Trans (liftIO)
+import Data.Data
 import Data.NeuralNetwork.Common
 
 -- | By giving a way to measure the error, 'learn' can update the
 -- neural network component.
-learn :: (ModelCst n e)
-      => (n,e)                              -- ^ neuron network
+learn :: (ModelCst n e, Optimizer o, Data (n o))
+      => (n o,e)                            -- ^ neuron network
       -> (Inp n, Val e)                     -- ^ input and expect output
-      -> Run n (n,e)                        -- ^ updated network
+      -> Run n (n o,e)                      -- ^ updated network
 learn (n,e) (i,o) = do
     tr <- forwardT n i
     o' <- liftIO $ eval e (output tr)

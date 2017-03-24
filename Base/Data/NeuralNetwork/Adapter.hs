@@ -18,10 +18,10 @@ module Data.NeuralNetwork.Adapter (
 import Data.Data
 import Data.NeuralNetwork
 
-data Adapter m i o e = Adapter (i -> m (e,o)) (e -> o -> m i)
+data Adapter m i o e t = Adapter (i -> m (e,o)) (e -> o -> m i)
   deriving Typeable
 
-instance (Typeable m, Typeable i, Typeable o, Typeable e) => Data (Adapter m i o e) where
+instance (Typeable m, Typeable i, Typeable o, Typeable e, Typeable t) => Data (Adapter m i o e t) where
   toConstr _ = adapterConstr
   gfoldl f z (Adapter u v) = z (Adapter u v)
   gunfold k z c = errorWithoutStackTrace "Data.Data.gunfold(Adapter)"

@@ -23,7 +23,7 @@ module Data.NeuralNetwork.Common(
   ErrCode(..),
   Backend(..),
   RunInEnv(..),
-  ModelCst, BackendCst,
+  ModelCst,
   SpecIn1D(..),
   SpecIn2D(..),
   SpecInStream(..),
@@ -49,7 +49,7 @@ import Data.HVect
 
 data OptVar opt grad = OptVar opt [grad]
 
-class Optimizer a where
+class Data a => Optimizer a where
   newOptVar :: a -> b -> IO (OptVar a b)
   optimize :: OptVar a b -> b -> IO b
 
@@ -98,7 +98,7 @@ instance BodySize a => BodySize (SpecFlow a) where
   bsize (SF n sz) (Flow a) = SF n (bsize sz a)
 
 -- | Abstraction of a neural network component
-class Component a where
+class (Typeable a, Applicative (Run a)) => Component (a :: * -> *) where
   type Dty a :: *
   -- | execution environment
   type Run a :: * -> *
@@ -109,14 +109,14 @@ class Component a where
   -- | the trace of a forward propagation
   data Trace a
   -- | Forward propagation
-  forwardT :: a -> Inp a -> Run a (Trace a)
+  forwardT :: (Optimizer o, Data (a o)) => a o -> Inp a -> Run a (Trace a)
   -- | Forward propagation
-  forward  :: Applicative (Run a) => a -> Inp a -> Run a (Out a)
+  forward  :: (Optimizer o, Data (a o)) => a o -> Inp a -> Run a (Out a)
   forward a = (output <$>) . forwardT a
   -- | extract the output value from the trace
   output   :: Trace a -> Out a
   -- | Backward propagation
-  backward :: a -> Trace a -> Out a -> Run a (a, Inp a)
+  backward :: (Optimizer o, Data (a o)) => a o -> Trace a -> Out a -> Run a (a o, Inp a)
 
 class Evaluator a where
   type Val a
@@ -125,29 +125,32 @@ class Evaluator a where
 
 -- translate the body of specification
 class MonadError ErrCode (Env b) => BodyTrans b s where
-  type SpecToCom b s o
+  type SpecToCom b s :: * -> *
+  -- The Run actually don't require opt, so
+  -- + SpecToRun b s and a witness that SpecToRun b s ~ Run (SpecToCom b s o)
+  -- + or, redefine Component (a :: * -> *), where opt is abstracted away
+  -- type SpecToRun b s
+  bwitness :: Optimizer o => b -> s -> o -> Dict (Component (SpecToCom b s), Data (SpecToCom b s o), RunInEnv (Run (SpecToCom b s)) (Env b))
   btrans   :: Optimizer o => b -> LayerSize -> s -> o -> Env b (SpecToCom b s o)
-  bwitness :: Optimizer o => b -> s -> o -> Dict (Component (SpecToCom b s o), RunInEnv (Run (SpecToCom b s o)) (Env b))
 
 data ErrCode = ErrMismatch
 
-type ModelCst   a b   = (Component a, MonadIO (Run a), Evaluator b, Out a ~ Val b)
-type BackendCst e a b = (ModelCst a b, RunInEnv (Run a) e)
+type ModelCst a b = (Component a, MonadIO (Run a), Evaluator b, Out a ~ Val b)
 
 -- | Abstraction of backend to carry out the specification
 class Backend b s where
   -- | environment to 'compile' the specification
   type Env b :: * -> *
   -- | result type of 'compile'
-  type ComponentFromSpec b s o
-  type EvaluatorFromSpec b s o
+  type ComponentFromSpec b s :: * -> *
+  type EvaluatorFromSpec b s :: *
   -- | necessary constraints of the resulting type
-  witness :: (Optimizer o, Out (ComponentFromSpec b s o) ~ Val (EvaluatorFromSpec b s o)) =>
-             b -> s -> o -> Dict ( Monad (Env b)
-                                 , BackendCst (Env b) (ComponentFromSpec b s o) (EvaluatorFromSpec b s o))
+  witness :: -- (Out (ComponentFromSpec b s) ~ Val (EvaluatorFromSpec b s)) =>
+             Optimizer o =>
+             b -> s -> o -> Dict (Monad (Env b), RunInEnv (Run (ComponentFromSpec b s)) (Env b),
+                                  ModelCst (ComponentFromSpec b s) (EvaluatorFromSpec b s))
   -- | compile the specification to runnable component.
-  compile :: Optimizer o =>
-             b -> s -> o -> Env b ((ComponentFromSpec b s o), (EvaluatorFromSpec b s o))
+  compile :: Optimizer o => b -> s -> o -> Env b ((ComponentFromSpec b s o), (EvaluatorFromSpec b s))
 
 -- | Lifting from one monad to another.
 -- It is not necessary that the 'Env' and 'Run' maps to the

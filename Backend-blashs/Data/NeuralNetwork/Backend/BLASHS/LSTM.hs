@@ -12,6 +12,7 @@
 -- This module supplies a LSTM component.
 ------------------------------------------------------------
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ConstraintKinds #-}
 module Data.NeuralNetwork.Backend.BLASHS.LSTM(
   LSTM(..), LSTM_Env_Transformer, newLSTM, Stream(..),
 ) where
@@ -23,6 +24,7 @@ import qualified Data.Vector as V
 import qualified Data.Map as M
 import Data.Data
 import Data.Generics
+import Data.Constraint (Dict(..))
 import Data.IORef
 import System.IO.Unsafe (unsafePerformIO)
 import Prelude hiding (tanh)
@@ -41,14 +43,14 @@ type MatR = DenseMatrix
 
 type LSTMident = Int
 
-data LSTM o p = LLSTM { parm_w_f, parm_w_i, parm_w_o, parm_w_c, parm_u_f, parm_u_i, parm_u_o :: WithVar MatR o p
+data LSTM p o = LLSTM { parm_w_f, parm_w_i, parm_w_o, parm_w_c, parm_u_f, parm_u_i, parm_u_o :: WithVar MatR o p
                       , parm_b_f, parm_b_i, parm_b_o, parm_b_c :: WithVar VecR o p
                       , lstm_id  :: LSTMident, lstm_isize, lstm_osize :: Int
                       }
   deriving Typeable
 
 
-instance (Data o, Data p) => Data (LSTM o p) where
+instance (Data o, Data p) => Data (LSTM p o) where
   toConstr a = lstmConstr
   gfoldl f z a = z (\i->a{lstm_id=i}) `f` (lstm_id a)
   gunfold k z c = errorWithoutStackTrace "Data.Data.gunfold(LSTM)"
@@ -64,7 +66,7 @@ newLSTM :: (Numeric p, RealType p, SIMDable p, Optimizer o)
         => Int        -- ^ input size
         -> Int        -- ^ output size
         -> o
-        -> IO (LSTM o p) -- ^ the new layer
+        -> IO (LSTM p o) -- ^ the new layer
 newLSTM m n opt =
   withSystemRandom . asGenIO $ \gen -> do
     let newW v = do raw <- newDenseVectorByGen (fromDouble <$> normal 0 v gen) (m*n)
@@ -120,15 +122,15 @@ type LSTMstreamInfo p = Either (LSTMstreamPrev p) (LSTMstreamNext p)
 
 type LSTM_Env_Transformer p = StateT (M.Map LSTMident (LSTMstreamInfo p))
 
-instance (Numeric p, RealType p, SIMDable p, Optimizer o) => Component (LSTM o p) where
+instance (Typeable p, Numeric p, RealType p, SIMDable p) => Component (LSTM p) where
   -- The state is mapping from LSTM identifier to Info.
   -- So when mutiple LSTM compoents are stacked, each can
   -- access its own state.
-  type Dty (LSTM o p) = p
-  type Run (LSTM o p) = LSTM_Env_Transformer p IO
-  type Inp (LSTM o p) = VecR p
-  type Out (LSTM o p) = VecR p
-  data Trace (LSTM o p) = LTrace { tr_mf, tr_mi, tr_mo, tr_n, tr_f, tr_i, tr_o, tr_c', tr_c, tr_inp, tr_out :: VecR p }
+  type Dty (LSTM p) = p
+  type Run (LSTM p) = LSTM_Env_Transformer p IO
+  type Inp (LSTM p) = VecR p
+  type Out (LSTM p) = VecR p
+  data Trace (LSTM p) = LTrace { tr_mf, tr_mi, tr_mo, tr_n, tr_f, tr_i, tr_o, tr_c', tr_c, tr_inp, tr_out :: VecR p }
   forwardT lstm x_t = do
     Just (Left c_tm1) <- gets (M.lookup $ lstm_id lstm)
 
@@ -350,40 +352,44 @@ instance (Numeric p, RealType p, SIMDable p, Optimizer o) => Component (LSTM o p
               })
     return (lstm, delta_inp)
 
-newtype Stream o a = Stream a
+data Stream (a :: * -> *) o = Stream (a o) (Dict (Data (a o)))
   deriving (Typeable, Data)
 
-instance (Data a, Component a, Data o, Optimizer o,
+instance (Component a, Typeable a,
           Inp a ~ VecR (Dty a),
           Typeable (Dty a), Numeric (Dty a), RealType (Dty a), SIMDable (Dty a),
-          Run a ~ LSTM_Env_Transformer (Dty a) IO) => Component (Stream o a) where
-  type Dty (Stream o a) = Dty a
-  type Run (Stream o a) = IO
-  type Inp (Stream o a) = [Inp a]
-  type Out (Stream o a) = [Out a]
-  newtype Trace (Stream o a) = StreamTrace [Trace a]
-  forwardT s@(Stream c) xs = do
-    -- set initial state for all LSTMs
-    st <- forM (collectLSTMs s) (\lstm -> do
-            vec <- newDenseVector (lstm_osize lstm)
-            return (lstm_id lstm, Left vec))
-    -- forward each input one by one, where the state is implicitly propagated.
-    trs <- flip evalStateT (M.fromList st) (mapM (forwardT c) xs)
-    return $ StreamTrace trs
+          Run a ~ LSTM_Env_Transformer (Dty a) IO) => Component (Stream a) where
+  type Dty (Stream a) = Dty a
+  type Run (Stream a) = IO
+  type Inp (Stream a) = [Inp a]
+  type Out (Stream a) = [Out a]
+  newtype Trace (Stream a) = StreamTrace [Trace a]
+  forwardT s@(Stream c e) xs =
+    case e of
+      Dict -> do
+        -- set initial state for all LSTMs
+        st <- forM (collectLSTMs s) (\lstm -> do
+                vec <- newDenseVector (lstm_osize lstm)
+                return (lstm_id lstm, Left vec))
+        -- forward each input one by one, where the state is implicitly propagated.
+        trs <- flip evalStateT (M.fromList st) (mapM (forwardT c) xs)
+        return $ StreamTrace trs
   output (StreamTrace trace) = map output trace
-  backward s@(Stream c) (StreamTrace trace) delta_out = do
-    -- set initial state for all LSTMs
-    st <- forM (collectLSTMs s) (\lstm ->
-            return (lstm_id lstm, Right NextNothing))
-    -- backward for each input one by one, and accumulate all updates
-    (c, delta_inp) <- flip evalStateT (M.fromList st) $ foldrM step (c, []) (zip trace delta_out)
-    return (Stream c, delta_inp)
+  backward s@(Stream c e) (StreamTrace trace) delta_out =
+    case e of
+      Dict -> do
+        -- set initial state for all LSTMs
+        st <- forM (collectLSTMs s) (\lstm ->
+                return (lstm_id lstm, Right NextNothing))
+        -- backward for each input one by one, and accumulate all updates
+        (c, delta_inp) <- flip evalStateT (M.fromList st) $ foldrM step (c, []) (zip trace delta_out)
+        return (Stream c e, delta_inp)
     where
       step (tr,dout) (c,ds) = do
         (c', di) <- backward c tr dout
         return (c', di:ds)
 
-collectLSTMs :: (Data a, Typeable (Dty a), Data o) => Stream o a -> [LSTM o (Dty a)]
+collectLSTMs :: (Component a, Typeable (Dty a), Typeable a, Data o, Data (a o)) => Stream a o -> [LSTM (Dty a) o]
 collectLSTMs = everything (++) ([] `mkQ` isLSTM)
   where
     isLSTM a@(LLSTM{}) = [a]

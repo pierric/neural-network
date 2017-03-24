@@ -13,7 +13,9 @@
 -- low-level blas-hs interfaces.
 ------------------------------------------------------------
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE ConstraintKinds #-}
 module Data.NeuralNetwork.Backend.BLASHS.Utils (
+  Precision,
   DenseVector(..),
   DenseMatrix(..),
   DenseMatrixArray(..),
@@ -43,7 +45,7 @@ module Data.NeuralNetwork.Backend.BLASHS.Utils (
   unsafeReadM, unsafeWriteM,
 ) where
 
-import Blas.Generic.Unsafe
+import Blas.Generic.Unsafe hiding (RealType)
 import Blas.Primitive.Types
 import qualified Data.Vector as BV
 import qualified Data.Vector.Storable as SV
@@ -53,12 +55,15 @@ import Control.Exception
 import Control.Monad
 import Control.Monad.Trans (MonadIO, liftIO)
 import Data.IORef
+import Data.Data
 import Foreign.Marshal.Array (advancePtr)
 import Text.Printf (printf, PrintfArg)
 import qualified Text.PrettyPrint.Free as P
 import System.IO.Unsafe (unsafePerformIO)
-import Data.NeuralNetwork.Common (OptVar)
+import Data.NeuralNetwork.Common (OptVar, RealType)
 import Data.NeuralNetwork.Backend.BLASHS.SIMD
+
+type Precision p = (Data p, Numeric p, RealType p, SIMDable p)
 
 -- | mutable vector type
 newtype DenseVector a = DenseVector (V.IOVector a)

@@ -38,7 +38,7 @@ type M = IO
 -- output:  vector of size n
 -- weights: matrix of size m x n
 -- biases:  vector of size n
-data FullConn  o p = FullConn {
+data FullConn  p o = FullConn {
   _fc_weights :: !(WithVar DenseMatrix o p),
   _fc_bias    :: !(WithVar DenseVector o p)
 } deriving Typeable
@@ -50,7 +50,7 @@ data FullConn  o p = FullConn {
 -- feature:  matrix of (s x t), # of features: m x n
 -- padding:  number of 0s padded at each side of channel
 -- biases:   bias for each output, # of biases: n
-data Convolute o p = Convolute {
+data Convolute p o = Convolute {
   _cn_kernels :: !(V.Vector (WithVar DenseMatrixArray o p)),
   _cn_bias    :: !(V.Vector (WithVar Scalar o p)),
   _cn_padding :: Int
@@ -61,33 +61,33 @@ data Convolute o p = Convolute {
 -- output: channels of 2D floats, of the same size (c x d), # of output channels: m
 --         where c = a / stride
 --               d = b / stride
-data MaxPool  p = MaxPool Int
+data MaxPool   p o = MaxPool Int
   deriving (Typeable, Data)
 -- | Activator
 -- the input can be either a 1D vector, 2D matrix
-data ActivateS p = ActivateS (SIMDPACK p -> SIMDPACK p) (SIMDPACK p -> SIMDPACK p)
+data ActivateS p o = ActivateS (SIMDPACK p -> SIMDPACK p) (SIMDPACK p -> SIMDPACK p)
   deriving Typeable
 -- | Activator
 -- the input can be channels of 1D vector or 2D matrix.
-data ActivateM p = ActivateM (SIMDPACK p -> SIMDPACK p) (SIMDPACK p -> SIMDPACK p)
+data ActivateM p o = ActivateM (SIMDPACK p -> SIMDPACK p) (SIMDPACK p -> SIMDPACK p)
   deriving Typeable
 
-instance (Data o, Data p) => Data (FullConn o p) where
+instance (Data o, Data p) => Data (FullConn p o) where
   toConstr (FullConn _ _)   = fullConstr
   gfoldl f z (FullConn u v) = z (FullConn u v)
   gunfold k z c = errorWithoutStackTrace "Data.Data.gunfold(FullConn)"
   dataTypeOf _  = fullType
-instance (Data o, Data p) => Data (Convolute o p) where
+instance (Data o, Data p) => Data (Convolute p o) where
   toConstr _ = convConstr
   gfoldl f z c = z c
   gunfold k z c = errorWithoutStackTrace "Data.Data.gunfold(Convolute)"
   dataTypeOf _  = convType
-instance Data p => Data (ActivateS p) where
+instance (Data o, Data p) => Data (ActivateS p o) where
   toConstr (ActivateS _ _) = actsConstr
   gfoldl f z (ActivateS u v) = z (ActivateS u v)
   gunfold k z c = errorWithoutStackTrace "Data.Data.gunfold(ActivateS)"
   dataTypeOf _  = actsType
-instance Data p => Data (ActivateM p) where
+instance (Data o, Data p) => Data (ActivateM p o) where
   toConstr (ActivateM _ _) = actmConstr
   gfoldl f z (ActivateM u v) = z (ActivateM u v)
   gunfold k z c = errorWithoutStackTrace "Data.Data.gunfold(ActivateM)"
@@ -102,13 +102,13 @@ actsType   = mkDataType "Data.NeuralNetwork.Backend.BLASHS.Utils.ActivateS" [act
 actmConstr = mkConstr actmType "ActivateM" ["activation forward", "activation backward"] Prefix
 actmType   = mkDataType "Data.NeuralNetwork.Backend.BLASHS.Utils.ActivateM" [actmConstr]
 
-instance (Numeric p, RealType p, SIMDable p, Optimizer o) => Component (FullConn o p) where
-    type Dty (FullConn o p) = p
-    type Run (FullConn o p) = IO
-    type Inp (FullConn o p) = DenseVector p
-    type Out (FullConn o p) = DenseVector p
+instance Precision p => Component (FullConn p) where
+    type Dty (FullConn p) = p
+    type Run (FullConn p) = IO
+    type Inp (FullConn p) = DenseVector p
+    type Out (FullConn p) = DenseVector p
     -- trace is (input, weighted-sum)
-    newtype Trace (FullConn o p) = DTrace (DenseVector p, DenseVector p)
+    newtype Trace (FullConn p) = DTrace (DenseVector p, DenseVector p)
     forwardT (FullConn !w !b) !inp = do
         bv <- newDenseVectorCopy (_parm b)
         bv <<+ inp :<# _parm w
@@ -128,13 +128,13 @@ instance (Numeric p, RealType p, SIMDable p, Optimizer o) => Component (FullConn
         _parm b <<= _parm b  :.+ db
         return (FullConn w b, idelta)
 
-instance (Numeric p, RealType p, SIMDable p, Optimizer o) => Component (Convolute o p) where
-  type Dty (Convolute o p) = p
-  type Run (Convolute o p) = IO
-  type Inp (Convolute o p) = V.Vector (DenseMatrix p)
-  type Out (Convolute o p) = V.Vector (DenseMatrix p)
+instance Precision p => Component (Convolute p) where
+  type Dty (Convolute p) = p
+  type Run (Convolute p) = IO
+  type Inp (Convolute p) = V.Vector (DenseMatrix p)
+  type Out (Convolute p) = V.Vector (DenseMatrix p)
   -- trace is (input, convoluted output)
-  newtype Trace (Convolute o p) = CTrace (Inp (Convolute o p), Out (Convolute o p))
+  newtype Trace (Convolute p) = CTrace (Inp (Convolute p), Out (Convolute p))
   forwardT (Convolute fss bs pd) !inp = do
     ma <- newDenseMatrixArray outn outr outc
     V.zipWithM_ (\fs i -> corr2 pd (denseMatrixArrayToVector $ _parm fs) i (ma <<+)) fss inp
@@ -185,7 +185,7 @@ instance (Numeric p, RealType p, SIMDable p, Optimizer o) => Component (Convolut
     let !ideltaV = denseMatrixArrayToVector idelta
     return $ (Convolute fss nb pd, ideltaV)
 
-instance (Numeric p, RealType p, SIMDable p) => Component (ActivateS p) where
+instance Precision p => Component (ActivateS p) where
     type Dty (ActivateS p) = p
     type Run (ActivateS p) = IO
     type Inp (ActivateS p) = DenseVector p
@@ -202,7 +202,7 @@ instance (Numeric p, RealType p, SIMDable p) => Component (ActivateS p) where
       idelta <<= odelta :.* idelta
       return $ (a, idelta)
 
-instance (Numeric p, RealType p, SIMDable p) => Component (ActivateM p) where
+instance Precision p => Component (ActivateM p) where
     type Dty (ActivateM p) = p
     type Run (ActivateM p) = IO
     type Inp (ActivateM p) = V.Vector (DenseMatrix p)
@@ -223,7 +223,7 @@ instance (Numeric p, RealType p, SIMDable p) => Component (ActivateM p) where
                            ) iv odelta
       return $ (a, idelta)
 
-instance (Numeric p, RealType p, SIMDable p) => Component (MaxPool p) where
+instance Precision p => Component (MaxPool p) where
   type Dty (MaxPool p) = p
   type Run (MaxPool p) = IO
   type Inp (MaxPool p) = V.Vector (DenseMatrix p)
@@ -252,7 +252,7 @@ instance (Numeric p, RealType p, SIMDable p) => Component (MaxPool p) where
 -- output: 1D vector of the concatenation of all input channels
 --         its size: m x a x b
 type Reshape2DAs1D p = Adapter IO (V.Vector (DenseMatrix p)) (DenseVector p) (Int, Int, Int)
-as1D :: (Numeric p, RealType p, SIMDable p) => Reshape2DAs1D p
+as1D :: (Precision p, Optimizer o) => Reshape2DAs1D p o
 as1D = Adapter to back
   where
     to inp = do
@@ -266,11 +266,11 @@ as1D = Adapter to back
 
 
 -- | create a new full connect component
-newFLayer :: (Numeric p, RealType p, SIMDable p, Optimizer o)
+newFLayer :: (Precision p, Optimizer o)
           => Int                -- ^ number of input values
           -> Int                -- ^ number of neurons (output values)
           -> o
-          -> IO (FullConn o p)    -- ^ the new layer
+          -> IO (FullConn p o)    -- ^ the new layer
 newFLayer m n opt =
     withSystemRandom . asGenIO $ \gen -> do
         raw <- newDenseVectorByGen (fromDouble <$> normal 0 0.01 gen) (m*n)
@@ -281,13 +281,13 @@ newFLayer m n opt =
         return $ FullConn (WithVar w ow) (WithVar b ob)
 
 -- | create a new convolutional component
-newCLayer :: (Numeric p, RealType p, SIMDable p, Optimizer o)
+newCLayer :: (Precision p, Optimizer o)
           => Int                -- ^ number of input channels
           -> Int                -- ^ number of output channels
           -> Int                -- ^ size of each feature
           -> Int                -- ^ size of padding
           -> o
-          -> IO (Convolute o p)   -- ^ the new layer
+          -> IO (Convolute p o)   -- ^ the new layer
 newCLayer inpsize outsize sfilter npadding opt =
   withSystemRandom . asGenIO $ \gen -> do
       fss <- V.replicateM inpsize $ do

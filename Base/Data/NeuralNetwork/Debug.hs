@@ -30,7 +30,7 @@ instance BodySize (SpecDebug a) where
   bsize s (Debug _) = s
 
 instance (Pretty a, MonadIO (Env b), MonadError ErrCode (Env b)) => BodyTrans b (SpecDebug a) where
-  type SpecToCom b (SpecDebug a) o = Debug a
+  type SpecToCom b (SpecDebug a) = Debug a
   btrans b s (Debug name) o = return $ Adapter to back
     where
       to inp = do liftIO $ putStrLn $ (name ++ "-(Forward):" )
