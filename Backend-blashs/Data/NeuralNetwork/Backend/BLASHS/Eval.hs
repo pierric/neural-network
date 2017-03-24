@@ -9,9 +9,7 @@
 -- Portability :  portable
 --
 --
--- This module supplies a backend for the neural-network-base
--- package. This backend is implemented on top of the blas-hs
--- package and optimised with SIMD.
+-- This module supplies a simple evaluator.
 ------------------------------------------------------------
 module Data.NeuralNetwork.Backend.BLASHS.Eval (
   Eval(..)
