@@ -12,7 +12,6 @@
 -- This module supplies a LSTM component.
 ------------------------------------------------------------
 {-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE ConstraintKinds #-}
 module Data.NeuralNetwork.Backend.BLASHS.LSTM(
   LSTM(..), LSTM_Env_Transformer, newLSTM, Stream(..),
 ) where
@@ -24,7 +23,7 @@ import qualified Data.Vector as V
 import qualified Data.Map as M
 import Data.Data
 import Data.Generics
-import Data.Constraint (Dict(..))
+import Data.Constraint (Dict(..), withDict)
 import Data.IORef
 import System.IO.Unsafe (unsafePerformIO)
 import Prelude hiding (tanh)
@@ -46,6 +45,7 @@ type LSTMident = Int
 data LSTM p o = LLSTM { parm_w_f, parm_w_i, parm_w_o, parm_w_c, parm_u_f, parm_u_i, parm_u_o :: WithVar MatR o p
                       , parm_b_f, parm_b_i, parm_b_o, parm_b_c :: WithVar VecR o p
                       , lstm_id  :: LSTMident, lstm_isize, lstm_osize :: Int
+                      , lstm_opt_ev :: (Dict (Optimizable o (VecR p)), Dict (Optimizable o (MatR p)))
                       }
   deriving Typeable
 
@@ -62,7 +62,7 @@ lstmDataType = mkDataType "Data.NeuralNetwork.Backend.BLASHS.LSTM.LSTM" [lstmCon
 global_LSTM_id_counter :: IORef Int
 global_LSTM_id_counter = unsafePerformIO (newIORef 0)
 -- | create a new LSTM component
-newLSTM :: (Numeric p, RealType p, SIMDable p, Optimizer o)
+newLSTM :: (Precision p, Optimizer o, Optimizable o (VecR p), Optimizable o (MatR p))
         => Int        -- ^ input size
         -> Int        -- ^ output size
         -> o
@@ -107,7 +107,8 @@ newLSTM m n opt =
       parm_b_c = parm_b_c,
       lstm_id  = lstm_id,
       lstm_isize = m,
-      lstm_osize = n
+      lstm_osize = n,
+      lstm_opt_ev = (Dict, Dict)
     }
 
 -- state passed forward
@@ -183,7 +184,7 @@ instance (Typeable p, Numeric p, RealType p, SIMDable p) => Component (LSTM p) w
 
   output = tr_out
 
-  backward lstm trace !delta_out = do
+  backward lstm trace !delta_out = withDict (fst $ lstm_opt_ev lstm) $ withDict (snd $ lstm_opt_ev lstm) $ do
     Just (Right upward) <- gets (M.lookup $ lstm_id lstm)
 
     (delta_ct, ori_uf, ori_ui, ori_uo) <- case upward of
@@ -365,8 +366,7 @@ instance (Component a, Typeable a,
   type Out (Stream a) = [Out a]
   newtype Trace (Stream a) = StreamTrace [Trace a]
   forwardT s@(Stream c e) xs =
-    case e of
-      Dict -> do
+    withDict e $ do
         -- set initial state for all LSTMs
         st <- forM (collectLSTMs s) (\lstm -> do
                 vec <- newDenseVector (lstm_osize lstm)
@@ -376,8 +376,7 @@ instance (Component a, Typeable a,
         return $ StreamTrace trs
   output (StreamTrace trace) = map output trace
   backward s@(Stream c e) (StreamTrace trace) delta_out =
-    case e of
-      Dict -> do
+    withDict e $ do
         -- set initial state for all LSTMs
         st <- forM (collectLSTMs s) (\lstm ->
                 return (lstm_id lstm, Right NextNothing))

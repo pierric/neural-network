@@ -26,6 +26,7 @@ import Control.Monad.ST
 import Control.Monad (liftM2, forM_, when)
 import GHC.Float
 import Data.Data
+import Data.Constraint (Dict(..), withDict)
 import Data.STRef
 import Data.NeuralNetwork
 import Data.NeuralNetwork.Adapter
@@ -40,7 +41,8 @@ type M = IO
 -- biases:  vector of size n
 data FullConn  p o = FullConn {
   _fc_weights :: !(WithVar DenseMatrix o p),
-  _fc_bias    :: !(WithVar DenseVector o p)
+  _fc_bias    :: !(WithVar DenseVector o p),
+  _fc_opt_ev  :: (Dict (Optimizable o (DenseMatrix p)), Dict (Optimizable o (DenseVector p)))
 } deriving Typeable
 -- | Convolutional layer
 -- input:  channels of 2D floats, of the same size (a x b), # of input channels:  m
@@ -53,7 +55,8 @@ data FullConn  p o = FullConn {
 data Convolute p o = Convolute {
   _cn_kernels :: !(V.Vector (WithVar DenseMatrixArray o p)),
   _cn_bias    :: !(V.Vector (WithVar Scalar o p)),
-  _cn_padding :: Int
+  _cn_padding :: Int,
+  _cn_opt_ev  :: (Dict (Optimizable o (DenseMatrixArray p)), Dict (Optimizable o (Scalar p)))
 } deriving Typeable
 -- | max pooling layer
 -- input:  channels of 2D floats, of the same size (a x b), # of input channels:  m
@@ -73,8 +76,8 @@ data ActivateM p o = ActivateM (SIMDPACK p -> SIMDPACK p) (SIMDPACK p -> SIMDPAC
   deriving Typeable
 
 instance (Data o, Data p) => Data (FullConn p o) where
-  toConstr (FullConn _ _)   = fullConstr
-  gfoldl f z (FullConn u v) = z (FullConn u v)
+  toConstr _ = fullConstr
+  gfoldl f z c = z c
   gunfold k z c = errorWithoutStackTrace "Data.Data.gunfold(FullConn)"
   dataTypeOf _  = fullType
 instance (Data o, Data p) => Data (Convolute p o) where
@@ -109,12 +112,12 @@ instance Precision p => Component (FullConn p) where
     type Out (FullConn p) = DenseVector p
     -- trace is (input, weighted-sum)
     newtype Trace (FullConn p) = DTrace (DenseVector p, DenseVector p)
-    forwardT (FullConn !w !b) !inp = do
+    forwardT (FullConn !w !b ev) !inp = do
         bv <- newDenseVectorCopy (_parm b)
         bv <<+ inp :<# _parm w
         return $ DTrace (inp,bv)
     output (DTrace (_,!a)) = a
-    backward (FullConn !w !b) (DTrace (!iv,!bv)) !odelta = do
+    backward (FullConn !w !b ev) (DTrace (!iv,!bv)) !odelta = withDict (fst ev) $ withDict (snd ev) $ do
         -- back-propagated error at input
         idelta <- newDenseVector (fst $ size $ _parm w)
         idelta <<= _parm w :#> odelta
@@ -126,7 +129,7 @@ instance Precision p => Component (FullConn p) where
 
         db <- optimize (_ovar b) odelta
         _parm b <<= _parm b  :.+ db
-        return (FullConn w b, idelta)
+        return (FullConn w b ev, idelta)
 
 instance Precision p => Component (Convolute p) where
   type Dty (Convolute p) = p
@@ -135,7 +138,7 @@ instance Precision p => Component (Convolute p) where
   type Out (Convolute p) = V.Vector (DenseMatrix p)
   -- trace is (input, convoluted output)
   newtype Trace (Convolute p) = CTrace (Inp (Convolute p), Out (Convolute p))
-  forwardT (Convolute fss bs pd) !inp = do
+  forwardT (Convolute fss bs pd ev) !inp = do
     ma <- newDenseMatrixArray outn outr outc
     V.zipWithM_ (\fs i -> corr2 pd (denseMatrixArrayToVector $ _parm fs) i (ma <<+)) fss inp
     let ov = denseMatrixArrayToVector ma
@@ -147,7 +150,7 @@ instance Precision p => Component (Convolute p) where
                         (_,u,v) = size (V.head fss)
                     in (x+2*pd-u+1, y+2*pd-v+1)
   output (CTrace (_,!a)) = a
-  backward (Convolute fss bs pd) (CTrace (iv, av)) !odelta = do
+  backward (Convolute fss bs pd ev) (CTrace (iv, av)) !odelta = withDict (fst ev) $ withDict (snd ev) $ do
     let (ir,ic) = size (V.head iv)
     idelta <- newDenseMatrixArray (V.length iv) ir ic
     fss'   <- transpose (V.map _parm fss)
@@ -183,7 +186,7 @@ instance Precision p => Component (Convolute p) where
       _parm fs <<= _parm fs :.+ dfs
 
     let !ideltaV = denseMatrixArrayToVector idelta
-    return $ (Convolute fss nb pd, ideltaV)
+    return $ (Convolute fss nb pd ev, ideltaV)
 
 instance Precision p => Component (ActivateS p) where
     type Dty (ActivateS p) = p
@@ -266,7 +269,8 @@ as1D = Adapter to back
 
 
 -- | create a new full connect component
-newFLayer :: (Precision p, Optimizer o)
+newFLayer :: (Precision p, Optimizer o,
+              Optimizable o (DenseMatrix p), Optimizable o (DenseVector p))
           => Int                -- ^ number of input values
           -> Int                -- ^ number of neurons (output values)
           -> o
@@ -278,10 +282,11 @@ newFLayer m n opt =
         ow  <- newOptVar opt w
         b   <- newDenseVectorConst n 1
         ob  <- newOptVar opt b
-        return $ FullConn (WithVar w ow) (WithVar b ob)
+        return $ FullConn (WithVar w ow) (WithVar b ob) (Dict, Dict)
 
 -- | create a new convolutional component
-newCLayer :: (Precision p, Optimizer o)
+newCLayer :: (Precision p, Optimizer o,
+              Optimizable o (DenseMatrixArray p), Optimizable o (Scalar p))
           => Int                -- ^ number of input channels
           -> Int                -- ^ number of output channels
           -> Int                -- ^ size of each feature
@@ -299,7 +304,7 @@ newCLayer inpsize outsize sfilter npadding opt =
                let v = 0.1
                ov <- newOptVar opt v
                return $ WithVar v ov
-      return $ Convolute fss bs npadding
+      return $ Convolute fss bs npadding (Dict, Dict)
   where
     truncNormal m s g = do
       x <- standard g

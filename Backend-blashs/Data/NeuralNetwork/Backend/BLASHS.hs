@@ -32,7 +32,7 @@ import Data.NeuralNetwork.Backend.BLASHS.Eval
 import Data.NeuralNetwork.Backend.BLASHS.SIMD
 import Control.Monad.Except (ExceptT, throwError)
 import Control.Monad.State
-import Data.Constraint (Dict(..))
+import Data.Constraint (Dict(..), withDict)
 import Blas.Generic.Unsafe (Numeric)
 
 -- | Compilation of the specification of a neural network is carried out in
@@ -56,9 +56,9 @@ instance (Precision p, BodyTrans (ByBLASHS p) s, InputLayer i,
   type ComponentFromSpec (ByBLASHS p) (i,s,SpecEvaluator) = SpecToCom (ByBLASHS p) s
   type EvaluatorFromSpec (ByBLASHS p) (i,s,SpecEvaluator) = Eval p
   compile b (i,s,o) opt = do c <- btrans b (isize i) s opt
-                             case bwitness b s opt of
-                               Dict -> return $ (c, Eval o)
-  witness b (i,s,o) opt = case bwitness b s opt of Dict -> Dict
+                             withDict (bwitness b s opt) $
+                               return (c, Eval o)
+  witness b (i,s,o) opt = withDict (bwitness b s opt) Dict
 
 instance RunInEnv IO Err where
   run = liftIO
@@ -102,6 +102,6 @@ instance (BodyTrans (ByBLASHS p) a) => BodyTrans (ByBLASHS p) (SpecFlow a) where
   --
   type SpecToCom (ByBLASHS p) (SpecFlow a) = Stream (SpecToCom (ByBLASHS p) a)
   btrans b (SV s) (Flow a) o = do u <- btrans b s a o
-                                  case bwitness b a o of
-                                    Dict -> return $ Stream u Dict
+                                  withDict (bwitness b a o) $
+                                    return (Stream u Dict)
   btrans _ _ _ _ = throwError ErrMismatch

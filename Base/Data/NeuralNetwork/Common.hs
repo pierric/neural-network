@@ -33,14 +33,16 @@ import Control.Monad.Except (MonadError)
 import Control.Monad.Trans (MonadIO)
 import GHC.Float (double2Float, float2Double)
 import Data.Constraint (Dict(..))
+import GHC.Exts (Constraint)
 import Data.Data
 import Data.HVect
 
 data OptVar opt grad = OptVar opt [grad]
 
 class Data a => Optimizer a where
-  newOptVar :: a -> b -> IO (OptVar a b)
-  optimize :: OptVar a b -> b -> IO b
+  type Optimizable a :: * -> Constraint
+  newOptVar :: Optimizable a b => a -> b -> IO (OptVar a b)
+  optimize  :: Optimizable a b => OptVar a b -> b -> IO b
 
 class (Fractional a, Ord a) => RealType a where
   fromDouble :: Double -> a
