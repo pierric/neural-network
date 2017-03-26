@@ -13,10 +13,11 @@
 -- package. This backend is implemented on top of the blas-hs
 -- package and optimised with SIMD.
 ------------------------------------------------------------
-{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE UndecidableInstances, DataKinds #-}
 module Data.NeuralNetwork.Backend.BLASHS (
   -- module Data.NeuralNetwork.Backend.BLASHS.Layers,
   module Data.NeuralNetwork.Backend.BLASHS.Utils,
+  module Data.NeuralNetwork.Backend.BLASHS.Optimizer,
   module Data.NeuralNetwork.Backend.BLASHS.LSTM,
   module Data.NeuralNetwork.Backend.BLASHS.SIMD,
   ByBLASHS(..), byBLASHSf, byBLASHSd
@@ -29,6 +30,7 @@ import Data.NeuralNetwork.Backend.BLASHS.Layers
 import Data.NeuralNetwork.Backend.BLASHS.LSTM
 import Data.NeuralNetwork.Backend.BLASHS.Utils
 import Data.NeuralNetwork.Backend.BLASHS.Eval
+import Data.NeuralNetwork.Backend.BLASHS.Optimizer
 import Data.NeuralNetwork.Backend.BLASHS.SIMD
 import Control.Monad.Except (ExceptT, throwError)
 import Control.Monad.State
@@ -47,61 +49,71 @@ byBLASHSf = ByBLASHS
 byBLASHSd :: ByBLASHS Double
 byBLASHSd = ByBLASHS
 
--- | Neural network specified to start with 1D / 2D input
-instance (Precision p, BodyTrans (ByBLASHS p) s, InputLayer i,
-          Out (SpecToCom (ByBLASHS p) s) ~ DenseVector p,
-          MonadIO (Run (SpecToCom (ByBLASHS p) s)))
-       => Backend (ByBLASHS p) (i,s,SpecEvaluator) where
-  type Env (ByBLASHS p) = Err
-  type ComponentFromSpec (ByBLASHS p) (i,s,SpecEvaluator) = SpecToCom (ByBLASHS p) s
-  type EvaluatorFromSpec (ByBLASHS p) (i,s,SpecEvaluator) = Eval p
-  compile b (i,s,o) opt = do c <- btrans b (isize i) s opt
-                             withDict (bwitness b s opt) $
-                               return (c, Eval o)
-  witness b (i,s,o) opt = withDict (bwitness b s opt) Dict
+type ByBLASHSCompilable p s e = (Precision p, BodyTrans (ByBLASHS p) s, e ~ SpecEvaluator,
+                                 Out (SpecToCom (ByBLASHS p) s) ~ DenseVector p,
+                                 MonadIO (Run (SpecToCom (ByBLASHS p) s)))
 
-instance RunInEnv IO Err where
-  run = liftIO
+-- | Neural network specified to start with 1D / 2D input
+instance Backend (ByBLASHS p) where
+  type Env (ByBLASHS p) = Err
+  type CompileComponent (ByBLASHS p) s = SpecToCom (ByBLASHS p) s
+  type CompileEvaluator (ByBLASHS p) s = Eval p
+  type CompileOptimizer (ByBLASHS p) SpecOptimizer = BlasOptimizer
+  type Optimizable (ByBLASHS p) opt = (OptCst opt (Scalar p), OptCst opt (DenseVector p), OptCst opt (DenseMatrix p), OptCst opt (DenseMatrixArray p))
+  type Compilable  (ByBLASHS p) s e = (ByBLASHSCompilable p s e)
+  compile b opt e i s = do c <- btrans b opt (isize i) s
+                           withDict (bwitness b opt s) $ return (c, Eval e)
+  witness b opt e s = withDict (bwitness b opt s) Dict
 
 instance Precision p => BodyTrans (ByBLASHS p) SpecFullConnect where
   -- 'SpecFullConnect' is translated to a two-layer component
   -- a full-connect, followed by a relu activation (1D, single channel)
   type SpecToCom (ByBLASHS p) SpecFullConnect = Stack (FullConn p) (ActivateS p) CE
-  btrans _ (D1 s) (FullConnect n) o = do u <- lift $ newFLayer s n o
+  btrans _ o (D1 s) (FullConnect n) = do u <- lift $ newFLayer s n o
                                          return $ Stack u (ActivateS relu relu') (Dict, Dict)
   btrans _ _ _ _ = throwError ErrMismatch
+  bwitness _ _ _ = Dict
 
 instance Precision p => BodyTrans (ByBLASHS p) SpecConvolution where
   -- 'SpecConvolution' is translated to a two-layer component
   -- a convolution, following by a relu activation (2D, multiple channels)
   type SpecToCom (ByBLASHS p) SpecConvolution = Stack (Convolute p) (ActivateM p) CE
-  btrans _ (D2 k s t) (Convolution n f p) o = do u <- lift $ newCLayer k n f p o
+  btrans _ o (D2 k s t) (Convolution n f p) = do u <- lift $ newCLayer k n f p o
                                                  return $ Stack u (ActivateM relu relu') (Dict, Dict)
   btrans _ _ _ _ = throwError ErrMismatch
+  bwitness _ _ _ = Dict
 
 instance Precision p => BodyTrans (ByBLASHS p) SpecMaxPooling where
   -- 'MaxPooling' is translated to a max-pooling component.
   type SpecToCom (ByBLASHS p) SpecMaxPooling = MaxPool p
-  btrans _ (D2 _ _ _) (MaxPooling n) _ = return (MaxPool n)
+  btrans _ _ (D2 _ _ _) (MaxPooling n) = return (MaxPool n)
   btrans _ _ _ _ = throwError ErrMismatch
+  bwitness _ _ _ = Dict
 
 instance Precision p => BodyTrans (ByBLASHS p) SpecReshape2DAs1D where
   -- 'SpecReshape2DAs1D' is translated to a reshaping component.
   type SpecToCom (ByBLASHS p) SpecReshape2DAs1D = Reshape2DAs1D p
-  btrans _ (D2 _ _ _) _ _ = return as1D
+  btrans _ _ (D2 _ _ _) _ = return as1D
   btrans _ _ _ _= throwError ErrMismatch
+  bwitness _ _ _ = Dict
 
 instance Precision p => BodyTrans (ByBLASHS p) SpecLSTM where
   -- 'SpecLSTM' is translated to a LSTM component.
   type SpecToCom (ByBLASHS p) SpecLSTM = Stack (LSTM p) (ActivateS p) (LiftRun (Run (LSTM p)) (Run (ActivateS p)))
-  btrans _ (D1 s) (LSTM n) o = do u <- lift $ newLSTM s n o
+  btrans _ o (D1 s) (LSTM n) = do u <- lift $ newLSTM s n o
                                   return $ Stack u (ActivateS relu relu') (Dict, Dict)
   btrans _ _ _ _ = throwError ErrMismatch
+  bwitness _ _ _ = Dict
 
-instance (BodyTrans (ByBLASHS p) a) => BodyTrans (ByBLASHS p) (SpecFlow a) where
+type Streamable p a = (p ~ Dty (SpecToCom (ByBLASHS p) a),
+                       Inp (SpecToCom (ByBLASHS p) a) ~ DenseVector p,
+                       Run (SpecToCom (ByBLASHS p) a) ~ LSTM_Env_Transformer p IO)
+instance (Precision p, BodyTrans (ByBLASHS p) a, Streamable p a) =>
+  BodyTrans (ByBLASHS p) (SpecFlow a) where
   --
   type SpecToCom (ByBLASHS p) (SpecFlow a) = Stream (SpecToCom (ByBLASHS p) a)
-  btrans b (SV s) (Flow a) o = do u <- btrans b s a o
-                                  withDict (bwitness b a o) $
+  btrans b o (SV s) (Flow a) = do u <- btrans b o s a
+                                  withDict (bwitness b o a) $
                                     return (Stream u Dict)
   btrans _ _ _ _ = throwError ErrMismatch
+  bwitness b o (Flow a) = withDict (bwitness b o a) $ Dict

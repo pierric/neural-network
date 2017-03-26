@@ -125,23 +125,23 @@ instance (Component a, Component b, Typeable t,
 -- internal type class to do induction on a non-empty hvect
 class MonadError ErrCode (Env k) => HVectStackable k a b where
   type HVectSpecToCom k a b :: * -> *
-  hvectWitness :: Optimizer o => k -> HVect (a ': b) -> o -> Dict (Component (HVectSpecToCom k a b), Data (HVectSpecToCom k a b o), RunInEnv (Run (HVectSpecToCom k a b)) (Env k))
-  hvectTrans   :: Optimizer o => k -> LayerSize -> HVect (a ': b) -> o -> Env k (HVectSpecToCom k a b o)
+  hvectWitness :: Optimizer o => k -> o -> HVect (a ': b) -> Dict (Component (HVectSpecToCom k a b), Data (HVectSpecToCom k a b o))
+  hvectTrans   :: (Optimizer o, Optimizable k o) => k -> o -> LayerSize -> HVect (a ': b) -> Env k (HVectSpecToCom k a b o)
 
 instance BodyTrans k a => HVectStackable k a '[] where
   type HVectSpecToCom k a '[] = SpecToCom k a
-  hvectTrans bk sz (a :&: HNil) o = btrans bk sz a o
+  hvectTrans bk o sz (a :&: HNil) = btrans bk o sz a
 
 instance (BodyTrans k a, BodySize a, HVectStackable k b c) => HVectStackable k a (b ': c) where
   type HVectSpecToCom k a (b ': c) = Stack (SpecToCom k a) (HVectSpecToCom k b c) (LiftRun (Run (SpecToCom k a)) (Run (HVectSpecToCom k b c)))
-  hvectTrans bk sz (a :&: bc) o = do c0 <- btrans bk sz a o
-                                     cs <- hvectTrans bk (bsize sz a) bc o
-                                     case (bwitness bk a o, hvectWitness bk bc o) of
+  hvectTrans bk o sz (a :&: bc) = do c0 <- btrans bk o sz a
+                                     cs <- hvectTrans bk o (bsize sz a) bc
+                                     case (bwitness bk o a, hvectWitness bk o bc) of
                                        (Dict, Dict) -> return (Stack c0 cs (Dict, Dict))
 
 instance HVectStackable k s0 ss => BodyTrans k (HVect (s0 ': ss)) where
   type SpecToCom k (HVect (s0 ': ss)) = HVectSpecToCom k s0 ss
-  btrans bk sz spec o = hvectTrans bk sz spec o
+  btrans bk o sz spec = hvectTrans bk o sz spec
 
 instance MonadError ErrCode (Env k) => BodyTrans k (HVect '[]) where
   type SpecToCom k (HVect '[]) = TypeError (Text "HVect '[] is not a valid specification of Neural Network")

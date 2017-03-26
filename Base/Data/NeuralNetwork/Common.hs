@@ -22,10 +22,8 @@ module Data.NeuralNetwork.Common(
   Evaluator(..),
   ErrCode(..),
   Backend(..),
-  RunInEnv(..),
   ModelCst,
   HVect((:&:),HNil),
-  OptVar,
   Optimizer(..),
 ) where
 
@@ -37,12 +35,11 @@ import GHC.Exts (Constraint)
 import Data.Data
 import Data.HVect
 
-data OptVar opt grad = OptVar opt [grad]
-
 class Data a => Optimizer a where
-  type Optimizable a :: * -> Constraint
-  newOptVar :: Optimizable a b => a -> b -> IO (OptVar a b)
-  optimize  :: Optimizable a b => OptVar a b -> b -> IO b
+  data OptVar a b
+  type OptCst a :: * -> Constraint
+  newOptVar :: OptCst a b => a -> b -> IO (OptVar a b)
+  optimize  :: OptCst a b => OptVar a b -> b -> IO b
 
 class (Fractional a, Ord a) => RealType a where
   fromDouble :: Double -> a
@@ -102,31 +99,30 @@ class MonadError ErrCode (Env b) => BodyTrans b s where
   -- + SpecToRun b s and a witness that SpecToRun b s ~ Run (SpecToCom b s o)
   -- + or, redefine Component (a :: * -> *), where opt is abstracted away
   -- type SpecToRun b s
-  bwitness :: Optimizer o => b -> s -> o -> Dict (Component (SpecToCom b s), Data (SpecToCom b s o), RunInEnv (Run (SpecToCom b s)) (Env b))
-  btrans   :: Optimizer o => b -> LayerSize -> s -> o -> Env b (SpecToCom b s o)
+  bwitness :: Optimizer o => b -> o -> s -> Dict (Component (SpecToCom b s), Data (SpecToCom b s o))
+  btrans   :: (Optimizer o, Optimizable b o) => b -> o -> LayerSize -> s -> Env b (SpecToCom b s o)
 
 data ErrCode = ErrMismatch
 
 type ModelCst a b = (Component a, MonadIO (Run a), Evaluator b, Out a ~ Val b)
 
 -- | Abstraction of backend to carry out the specification
-class Backend b s where
+class Backend b where
   -- | environment to 'compile' the specification
   type Env b :: * -> *
+  -- | constraints of optimizable type, restricting the possible optimizer passed to 'compile'
+  type Optimizable b o :: Constraint
   -- | result type of 'compile'
-  type ComponentFromSpec b s :: * -> *
-  type EvaluatorFromSpec b s :: *
+  type Compilable  b s e     :: Constraint
+  type CompileComponent b s :: * -> *
+  type CompileEvaluator b s :: *
+  type CompileOptimizer b o :: *
   -- | necessary constraints of the resulting type
-  witness :: -- (Out (ComponentFromSpec b s) ~ Val (EvaluatorFromSpec b s)) =>
-             Optimizer o =>
-             b -> s -> o -> Dict (Monad (Env b), RunInEnv (Run (ComponentFromSpec b s)) (Env b),
-                                  ModelCst (ComponentFromSpec b s) (EvaluatorFromSpec b s))
+  witness :: (Optimizer o, Compilable b s e) =>
+             b -> o -> e -> s -> Dict (Monad (Env b),
+                                       ModelCst (CompileComponent b s) (CompileEvaluator b e))
   -- | compile the specification to runnable component.
-  compile :: Optimizer o => b -> s -> o -> Env b ((ComponentFromSpec b s o), (EvaluatorFromSpec b s))
-
--- | Lifting from one monad to another.
--- It is not necessary that the 'Env' and 'Run' maps to the
--- same execution environment, but the 'Run' one should be
--- able to be lifted to 'Env' one.
-class (Monad r, Monad e) => RunInEnv r e where
-  run :: r a -> e a
+  compile :: (InputLayer i, Compilable b s e, Optimizer o, Optimizable b o) =>
+             b -> o -> e -> i -> s -> Env b ((CompileComponent b s o), (CompileEvaluator b e))
+  -- | make a optimizer
+  mkopt   :: b -> o -> Env b (CompileOptimizer b o)

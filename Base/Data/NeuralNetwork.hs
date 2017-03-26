@@ -110,7 +110,7 @@ data SpecFlow a = Flow a
 data SpecEvaluator = MeanSquaredError | SoftmaxCrossEntropy
   deriving (Typeable, Data)
 
-data SpecOptimizer = ScaleGrad | ADAGrad | ADAM
+data SpecOptimizer = ScaleGrad Float | ADAGrad | ADAM
   deriving (Typeable, Data)
 
 instance InputLayer SpecInStream where

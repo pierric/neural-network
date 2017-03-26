@@ -42,7 +42,7 @@ type M = IO
 data FullConn  p o = FullConn {
   _fc_weights :: !(WithVar DenseMatrix o p),
   _fc_bias    :: !(WithVar DenseVector o p),
-  _fc_opt_ev  :: (Dict (Optimizable o (DenseMatrix p)), Dict (Optimizable o (DenseVector p)))
+  _fc_opt_ev  :: (Dict (OptCst o (DenseMatrix p)), Dict (OptCst o (DenseVector p)))
 } deriving Typeable
 -- | Convolutional layer
 -- input:  channels of 2D floats, of the same size (a x b), # of input channels:  m
@@ -56,7 +56,7 @@ data Convolute p o = Convolute {
   _cn_kernels :: !(V.Vector (WithVar DenseMatrixArray o p)),
   _cn_bias    :: !(V.Vector (WithVar Scalar o p)),
   _cn_padding :: Int,
-  _cn_opt_ev  :: (Dict (Optimizable o (DenseMatrixArray p)), Dict (Optimizable o (Scalar p)))
+  _cn_opt_ev  :: (Dict (OptCst o (DenseMatrixArray p)), Dict (OptCst o (Scalar p)))
 } deriving Typeable
 -- | max pooling layer
 -- input:  channels of 2D floats, of the same size (a x b), # of input channels:  m
@@ -270,7 +270,7 @@ as1D = Adapter to back
 
 -- | create a new full connect component
 newFLayer :: (Precision p, Optimizer o,
-              Optimizable o (DenseMatrix p), Optimizable o (DenseVector p))
+              OptCst o (DenseMatrix p), OptCst o (DenseVector p))
           => Int                -- ^ number of input values
           -> Int                -- ^ number of neurons (output values)
           -> o
@@ -286,7 +286,7 @@ newFLayer m n opt =
 
 -- | create a new convolutional component
 newCLayer :: (Precision p, Optimizer o,
-              Optimizable o (DenseMatrixArray p), Optimizable o (Scalar p))
+              OptCst o (DenseMatrixArray p), OptCst o (Scalar p))
           => Int                -- ^ number of input channels
           -> Int                -- ^ number of output channels
           -> Int                -- ^ size of each feature

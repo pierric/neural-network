@@ -19,7 +19,6 @@ module Data.NeuralNetwork.Backend.BLASHS.LSTM(
 import Blas.Generic.Unsafe (Numeric)
 import Control.Monad.State.Strict
 import Data.Foldable (foldrM)
-import qualified Data.Vector as V
 import qualified Data.Map as M
 import Data.Data
 import Data.Generics
@@ -28,14 +27,10 @@ import Data.IORef
 import System.IO.Unsafe (unsafePerformIO)
 import Prelude hiding (tanh)
 import Data.NeuralNetwork
-import Data.NeuralNetwork.Adapter
 import Data.NeuralNetwork.Backend.BLASHS.Utils
 import Data.NeuralNetwork.Backend.BLASHS.SIMD
 import System.Random.MWC
 import System.Random.MWC.Distributions
--- import GHC.Float (double2Float)
-import Data.Vector.Storable (Storable)
-import qualified Text.PrettyPrint.Free as P
 
 type VecR = DenseVector
 type MatR = DenseMatrix
@@ -45,7 +40,7 @@ type LSTMident = Int
 data LSTM p o = LLSTM { parm_w_f, parm_w_i, parm_w_o, parm_w_c, parm_u_f, parm_u_i, parm_u_o :: WithVar MatR o p
                       , parm_b_f, parm_b_i, parm_b_o, parm_b_c :: WithVar VecR o p
                       , lstm_id  :: LSTMident, lstm_isize, lstm_osize :: Int
-                      , lstm_opt_ev :: (Dict (Optimizable o (VecR p)), Dict (Optimizable o (MatR p)))
+                      , lstm_opt_ev :: (Dict (OptCst o (VecR p), OptCst o (MatR p)))
                       }
   deriving Typeable
 
@@ -62,7 +57,7 @@ lstmDataType = mkDataType "Data.NeuralNetwork.Backend.BLASHS.LSTM.LSTM" [lstmCon
 global_LSTM_id_counter :: IORef Int
 global_LSTM_id_counter = unsafePerformIO (newIORef 0)
 -- | create a new LSTM component
-newLSTM :: (Precision p, Optimizer o, Optimizable o (VecR p), Optimizable o (MatR p))
+newLSTM :: (Precision p, Optimizer o, OptCst o (VecR p), OptCst o (MatR p))
         => Int        -- ^ input size
         -> Int        -- ^ output size
         -> o
@@ -108,7 +103,7 @@ newLSTM m n opt =
       lstm_id  = lstm_id,
       lstm_isize = m,
       lstm_osize = n,
-      lstm_opt_ev = (Dict, Dict)
+      lstm_opt_ev = Dict
     }
 
 -- state passed forward
@@ -184,7 +179,7 @@ instance (Typeable p, Numeric p, RealType p, SIMDable p) => Component (LSTM p) w
 
   output = tr_out
 
-  backward lstm trace !delta_out = withDict (fst $ lstm_opt_ev lstm) $ withDict (snd $ lstm_opt_ev lstm) $ do
+  backward lstm trace !delta_out = withDict (lstm_opt_ev lstm) $ do
     Just (Right upward) <- gets (M.lookup $ lstm_id lstm)
 
     (delta_ct, ori_uf, ori_ui, ori_uo) <- case upward of

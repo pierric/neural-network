@@ -16,13 +16,15 @@ import System.IO (hFlush, stdout)
 import System.IO.Unsafe
 import Parser
 
-main = do x <- runExceptT $ compile byBLASHSf (In2D 28 28,
-                                              Convolution 2 7 3 :&: MaxPooling 2 :&:
-                                              Convolution 4 5 2 :&: MaxPooling 2 :&:
-                                              Reshape2DAs1D :&:
-                                              FullConnect 512 :&: FullConnect 32 :&:
-                                              FullConnect 10 :&: HNil,
-                                              MeanSquaredError)
+main = do x <- runExceptT $ do
+                 opt <- mkopt byBLASHSf (ScaleGrad 0.01)
+                 compile byBLASHSf opt MeanSquaredError (In2D 28 28)
+                         (Convolution 2 7 3 :&: MaxPooling 2 :&:
+                          Convolution 4 5 2 :&: MaxPooling 2 :&:
+                          Reshape2DAs1D :&:
+                          FullConnect 512 :&: FullConnect 32 :&:
+                          FullConnect 10 :&: HNil)
+
           case x of
             Left _ -> putStrLn "Error."
             Right cnn -> do
@@ -38,12 +40,11 @@ main = do x <- runExceptT $ compile byBLASHSf (In2D 28 28,
       let next = (reads :: ReadS Int) str
       when (not $ null next) (loop cnn (fst $ head next))
 
-debug :: (ModelCst n e, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
-      => (n,e) -> IO ()
+-- debug :: (ModelCst n e, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
+--       => (n SpecOptimizer,e) -> IO ()
 debug nn = do
   a0:a1:_ <- getArgs
   let cycle = read a0 :: Int
-      rate  = read a1 :: Float
   putStrLn "Load training data."
   dataset <- trainingData >>= mapM preprocess . uncurry zip
   testset <- testData >>= mapM preprocess . take 10 . uncurry zip
@@ -53,11 +54,11 @@ debug nn = do
         writeIORef cnt (i+1)
         putStrLn ("Iteration " ++ show i)
   nn <- iterateM (cycle `div` checkpoint) nn $ \nn1 -> do
-          nn1 <- iterateM checkpoint nn1 $ (dispAndInc >>) . online rate dataset
+          nn1 <- iterateM checkpoint nn1 $ (dispAndInc >>) . online dataset
           putStrLn "[test]..."
           smalltest testset nn1
           return nn1
-  nn <- iterateM (cycle `mod` checkpoint) nn $ (dispAndInc >>) . online rate dataset
+  nn <- iterateM (cycle `mod` checkpoint) nn $ (dispAndInc >>) . online dataset
   putStrLn "[final test]..."
   smalltest testset nn
   where
@@ -68,8 +69,8 @@ debug nn = do
         prettyResult pv >>= putStrLn . ("+" ++ )
         prettyResult ev >>= putStrLn . ("*" ++ )
 
-dotrain :: (ModelCst n e, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
-        => (n,e)-> Int -> IO (n,e)
+-- dotrain :: (ModelCst n e, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
+--         => (n SpecOptimizer,e)-> Int -> IO (n SpecOptimizer,e)
 dotrain nn mcnt = do
   putStrLn "Load training data."
   dataset <- trainingData >>= mapM preprocess . uncurry zip
@@ -80,10 +81,10 @@ dotrain nn mcnt = do
         i <- readIORef cnt
         writeIORef cnt (i+1)
         putStrLn ("Iteration " ++ show i)
-  iterateM mcnt nn ((dispAndInc >>) . online 0.001 dataset)
+  iterateM mcnt nn ((dispAndInc >>) . online dataset)
 
-dotest :: (ModelCst n e, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
-       => (n,e) -> IO ()
+-- dotest :: (ModelCst n e, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
+--        => (n SpecOptimizer,e) -> IO ()
 dotest !(nn,_) = do
     testset <- testData >>= mapM preprocess . uncurry zip
     putStrLn "Start test"
@@ -97,12 +98,12 @@ dotest !(nn,_) = do
       prettyResult pv >>= putStrLn . ("+" ++ )
       prettyResult ev >>= putStrLn . ("*" ++ )
 
-online :: (ModelCst n e, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
-       => Float -> [(Inp n, Out n)] -> (n,e) -> IO (n,e)
-online rate ds !nn = walk ds nn
+-- online :: (ModelCst n e, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
+--        => [(Inp n, Out n)] -> (n SpecOptimizer,e) -> IO (n SpecOptimizer,e)
+online ds !nn = walk ds nn
   where
     walk []     !nn = return nn
-    walk (d:ds) !nn = do !nn <- learn nn d rate
+    walk (d:ds) !nn = do !nn <- learn nn d
                          walk ds nn
 
 iterateM :: (MonadIO m) => Int -> a -> (a -> m a) -> m a
