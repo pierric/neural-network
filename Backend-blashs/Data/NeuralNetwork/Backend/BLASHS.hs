@@ -49,26 +49,27 @@ byBLASHSf = ByBLASHS
 byBLASHSd :: ByBLASHS Double
 byBLASHSd = ByBLASHS
 
-type ByBLASHSCompilable p s e = (Precision p, BodyTrans (ByBLASHS p) s, e ~ SpecEvaluator,
-                                 Out (SpecToCom (ByBLASHS p) s) ~ DenseVector p,
-                                 MonadIO (Run (SpecToCom (ByBLASHS p) s)))
+type ByBLASHSCompilable p s = (Precision p, BodyTrans (ByBLASHS p) s,
+                               Out (SpecToCom (ByBLASHS p) s) ~ DenseVector p,
+                               MonadIO (Run (SpecToCom (ByBLASHS p) s)))
 
 -- | Neural network specified to start with 1D / 2D input
 instance Backend (ByBLASHS p) where
   type Env (ByBLASHS p) = Err
   type CompileComponent (ByBLASHS p) s = SpecToCom (ByBLASHS p) s
-  type CompileEvaluator (ByBLASHS p) s = Eval p
-  type CompileOptimizer (ByBLASHS p) SpecOptimizer = BlasOptimizer
+  type CompileEvaluator (ByBLASHS p)   = Eval p
+  type CompileOptimizer (ByBLASHS p)   = BlasOptimizer
   type Optimizable (ByBLASHS p) opt = (OptCst opt (Scalar p), OptCst opt (DenseVector p), OptCst opt (DenseMatrix p), OptCst opt (DenseMatrixArray p))
-  type Compilable  (ByBLASHS p) s e = (ByBLASHSCompilable p s e)
+  type Compilable  (ByBLASHS p) s   = (ByBLASHSCompilable p s)
   compile b opt e i s = do c <- btrans b opt (isize i) s
                            withDict (bwitness b opt s) $ return (c, Eval e)
+  mkopt b s = return $ BlasOptimizer s
   witness b opt e s = withDict (bwitness b opt s) Dict
 
 instance Precision p => BodyTrans (ByBLASHS p) SpecFullConnect where
   -- 'SpecFullConnect' is translated to a two-layer component
   -- a full-connect, followed by a relu activation (1D, single channel)
-  type SpecToCom (ByBLASHS p) SpecFullConnect = Stack (FullConn p) (ActivateS p) CE
+  type SpecToCom (ByBLASHS p) SpecFullConnect = Stack (FullConn p) (ActivateS p)
   btrans _ o (D1 s) (FullConnect n) = do u <- lift $ newFLayer s n o
                                          return $ Stack u (ActivateS relu relu') (Dict, Dict)
   btrans _ _ _ _ = throwError ErrMismatch
@@ -77,7 +78,7 @@ instance Precision p => BodyTrans (ByBLASHS p) SpecFullConnect where
 instance Precision p => BodyTrans (ByBLASHS p) SpecConvolution where
   -- 'SpecConvolution' is translated to a two-layer component
   -- a convolution, following by a relu activation (2D, multiple channels)
-  type SpecToCom (ByBLASHS p) SpecConvolution = Stack (Convolute p) (ActivateM p) CE
+  type SpecToCom (ByBLASHS p) SpecConvolution = Stack (Convolute p) (ActivateM p)
   btrans _ o (D2 k s t) (Convolution n f p) = do u <- lift $ newCLayer k n f p o
                                                  return $ Stack u (ActivateM relu relu') (Dict, Dict)
   btrans _ _ _ _ = throwError ErrMismatch
@@ -99,9 +100,9 @@ instance Precision p => BodyTrans (ByBLASHS p) SpecReshape2DAs1D where
 
 instance Precision p => BodyTrans (ByBLASHS p) SpecLSTM where
   -- 'SpecLSTM' is translated to a LSTM component.
-  type SpecToCom (ByBLASHS p) SpecLSTM = Stack (LSTM p) (ActivateS p) (LiftRun (Run (LSTM p)) (Run (ActivateS p)))
+  type SpecToCom (ByBLASHS p) SpecLSTM = Stack (LSTM p) (Lift (LSTM_Env_Transformer p) (ActivateS p))
   btrans _ o (D1 s) (LSTM n) = do u <- lift $ newLSTM s n o
-                                  return $ Stack u (ActivateS relu relu') (Dict, Dict)
+                                  return $ Stack u (Lift (ActivateS relu relu') Dict) (Dict, Dict)
   btrans _ _ _ _ = throwError ErrMismatch
   bwitness _ _ _ = Dict
 

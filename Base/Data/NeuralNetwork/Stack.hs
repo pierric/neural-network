@@ -18,22 +18,21 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ConstraintKinds #-}
 module Data.NeuralNetwork.Stack (
-  Stack(..),
-  CE, CL, CR, LiftRun,
+  Stack(..), Lift(..)
 ) where
 
 import Data.Data
 import Data.HVect
 import GHC.TypeLits
-import Data.Constraint (Dict(..))
+import Data.Constraint (Dict(..), withDict, Constraint)
 import Control.Monad.Trans
 import Control.Monad.Except (MonadError)
 import Data.NeuralNetwork
 
-data Stack (a :: * -> *) (b :: * -> *) c o = Stack (a o) (b o) (Dict (Data (a o)), Dict (Data (b o)))
+data Stack (a :: * -> *) (b :: * -> *) o = Stack (a o) (b o) (Dict (Data (a o)), Dict (Data (b o)))
   deriving Typeable
 
-instance (Typeable a, Typeable b, Typeable c, Typeable o, Data (a o), Data (b o)) => Data (Stack a b c o) where
+instance (Typeable a, Typeable b, Typeable o, Data (a o), Data (b o)) => Data (Stack a b o) where
   toConstr a = stackConstr
   gfoldl f z (Stack a b e) = z Stack `f` a `f` b `f` e
   gunfold k z c = errorWithoutStackTrace "Data.Data.gunfold(Stack)"
@@ -42,24 +41,16 @@ instance (Typeable a, Typeable b, Typeable c, Typeable o, Data (a o), Data (b o)
 stackConstr = mkConstr stackDataType "Stack" ["a", "b"] Prefix
 stackDataType = mkDataType "Data.NeuralNetwork.Stack.Stack" [stackConstr]
 
-data CE
-data CL (t :: (* -> *) -> * -> *)
-data CR (t :: (* -> *) -> * -> *)
-type family LiftRun (u :: * -> *) (v :: * -> *) where
-  LiftRun (t m) m = CL t
-  LiftRun m (t m) = CR t
-  LiftRun m m     = CE
-
 instance (Component a, Component b,
           Monad (Run a), Monad (Run b),
           Run a ~ Run b,
           Out a ~ Inp b
-         ) => Component (Stack a b CE) where
-  type Dty (Stack a b CE) = Dty a
-  type Run (Stack a b CE) = Run a
-  type Inp (Stack a b CE) = Inp a
-  type Out (Stack a b CE) = Out b
-  newtype Trace (Stack a b CE) = S0Trace (Trace b, Trace a)
+         ) => Component (Stack a b) where
+  type Dty (Stack a b) = Dty a
+  type Run (Stack a b) = Run a
+  type Inp (Stack a b) = Inp a
+  type Out (Stack a b) = Out b
+  newtype Trace (Stack a b) = S0Trace (Trace b, Trace a)
   forwardT (Stack a b e) !i =
     case e of
       (Dict, Dict) -> do
@@ -74,53 +65,21 @@ instance (Component a, Component b,
         (a', !idelta) <- backward a tra odelta
         return (Stack a' b' e, idelta)
 
-instance (Component a, Component b, Typeable t,
-          Monad (Run a), Monad (Run b),
-          MonadTrans t, Run a ~ t (Run b),
-          Out a ~ Inp b
-         ) => Component (Stack a b (CL t)) where
-  type Dty (Stack a b (CL t)) = Dty a
-  type Run (Stack a b (CL t)) = Run a
-  type Inp (Stack a b (CL t)) = Inp a
-  type Out (Stack a b (CL t)) = Out b
-  newtype Trace (Stack a b (CL t)) = S1Trace (Trace b, Trace a)
-  forwardT (Stack a b e) !i = do
-    case e of
-      (Dict, Dict) -> do
-        !tra <- forwardT a i
-        !trb <- lift $ forwardT b (output tra)
-        return $ S1Trace (trb, tra)
-  output (S1Trace !a) = output (fst a)
-  backward (Stack a b e) (S1Trace (!trb,!tra)) !odeltb = do
-    case e of
-      (Dict, Dict) -> do
-        (b', !odelta) <- lift $ backward b trb odeltb
-        (a', !idelta) <- backward a tra odelta
-        return (Stack a' b' e, idelta)
-
-instance (Component a, Component b, Typeable t,
-          Monad (Run a), Monad (Run b),
-          MonadTrans t, Run b ~ t (Run a),
-          Out a ~ Inp b
-         ) => Component (Stack a b (CR t)) where
-  type Dty (Stack a b (CR t)) = Dty a
-  type Run (Stack a b (CR t)) = Run b
-  type Inp (Stack a b (CR t)) = Inp a
-  type Out (Stack a b (CR t)) = Out b
-  newtype Trace (Stack a b (CR t)) = S2Trace (Trace b, Trace a)
-  forwardT (Stack a b e) !i = do
-    case e of
-      (Dict, Dict) -> do
-        !tra <- lift $ forwardT a i
-        !trb <- forwardT b (output tra)
-        return $ S2Trace (trb, tra)
-  output (S2Trace !a) = output (fst a)
-  backward (Stack a b e) (S2Trace (!trb,!tra)) !odeltb = do
-    case e of
-      (Dict, Dict) -> do
-        (b', !odelta) <- backward b trb odeltb
-        (a', !idelta) <- lift $ backward a tra odelta
-        return (Stack a' b' e, idelta)
+data Lift (t :: (* -> *) -> * -> *) (c :: * -> *) o = Lift (c o) (Dict (Data (c o)))
+  deriving (Typeable, Data)
+instance (Component c, Typeable t, MonadTrans t, Monad (t (Run c))) => Component (Lift t c) where
+  type Dty (Lift t c) = Dty c
+  type Run (Lift t c) = t (Run c)
+  type Inp (Lift t c) = Inp c
+  type Out (Lift t c) = Out c
+  newtype Trace (Lift t c) = LtTrace (Trace c)
+  forwardT (Lift c e) !i = withDict e $ do
+    o <- lift $ forwardT c i
+    return $ LtTrace o
+  output (LtTrace !a) = output a
+  backward (Lift c e) (LtTrace t) !odeltb = withDict e $ do
+    (c', idelta) <- lift $ backward c t odeltb
+    return (Lift c' e, idelta)
 
 -- internal type class to do induction on a non-empty hvect
 class MonadError ErrCode (Env k) => HVectStackable k a b where
@@ -131,20 +90,29 @@ class MonadError ErrCode (Env k) => HVectStackable k a b where
 instance BodyTrans k a => HVectStackable k a '[] where
   type HVectSpecToCom k a '[] = SpecToCom k a
   hvectTrans bk o sz (a :&: HNil) = btrans bk o sz a
+  hvectWitness bk o  (a :&: HNil) = bwitness bk o a
 
-instance (BodyTrans k a, BodySize a, HVectStackable k b c) => HVectStackable k a (b ': c) where
-  type HVectSpecToCom k a (b ': c) = Stack (SpecToCom k a) (HVectSpecToCom k b c) (LiftRun (Run (SpecToCom k a)) (Run (HVectSpecToCom k b c)))
+instance (BodyTrans k a, BodySize a, HVectStackable k b c,
+          Out (SpecToCom k a) ~ Inp (HVectSpecToCom k b c),
+          Run (SpecToCom k a) ~ Run (HVectSpecToCom k b c)
+          ) => HVectStackable k a (b ': c) where
+  type HVectSpecToCom k a (b ': c) = Stack (SpecToCom k a) (HVectSpecToCom k b c)
   hvectTrans bk o sz (a :&: bc) = do c0 <- btrans bk o sz a
                                      cs <- hvectTrans bk o (bsize sz a) bc
                                      case (bwitness bk o a, hvectWitness bk o bc) of
                                        (Dict, Dict) -> return (Stack c0 cs (Dict, Dict))
+  hvectWitness bk o (a :&: bc)  = case (bwitness bk o a, hvectWitness bk o bc) of
+                                    (Dict, Dict) -> Dict
 
 instance HVectStackable k s0 ss => BodyTrans k (HVect (s0 ': ss)) where
   type SpecToCom k (HVect (s0 ': ss)) = HVectSpecToCom k s0 ss
   btrans bk o sz spec = hvectTrans bk o sz spec
+  bwitness = hvectWitness
 
 instance MonadError ErrCode (Env k) => BodyTrans k (HVect '[]) where
   type SpecToCom k (HVect '[]) = TypeError (Text "HVect '[] is not a valid specification of Neural Network")
+  bwitness = undefined
+  btrans   = undefined
 
 class HVectSize a b where
   hvectSize  :: LayerSize -> HVect (a ': b) -> LayerSize

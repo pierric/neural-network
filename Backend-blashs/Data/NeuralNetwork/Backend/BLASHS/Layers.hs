@@ -123,7 +123,7 @@ instance Precision p => Component (FullConn p) where
         idelta <<= _parm w :#> odelta
 
         dw <- uncurry newDenseMatrix (size $ _parm w)
-        dw <<= iv :## odelta
+        dw <<+ iv :## odelta
         dw <- optimize (_ovar w) dw
         _parm w <<= _parm w :.+ dw
 

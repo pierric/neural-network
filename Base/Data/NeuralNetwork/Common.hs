@@ -20,6 +20,9 @@ module Data.NeuralNetwork.Common(
   BodySize(..), BodyTrans(..),
   Component(..),
   Evaluator(..),
+  Optimizer(..),
+  SpecEvaluator(..),
+  SpecOptimizer(..),
   ErrCode(..),
   Backend(..),
   ModelCst,
@@ -34,12 +37,6 @@ import Data.Constraint (Dict(..))
 import GHC.Exts (Constraint)
 import Data.Data
 import Data.HVect
-
-class Data a => Optimizer a where
-  data OptVar a b
-  type OptCst a :: * -> Constraint
-  newOptVar :: OptCst a b => a -> b -> IO (OptVar a b)
-  optimize  :: OptCst a b => OptVar a b -> b -> IO b
 
 class (Fractional a, Ord a) => RealType a where
   fromDouble :: Double -> a
@@ -67,7 +64,7 @@ class BodySize l where
   bsize :: LayerSize -> l -> LayerSize
 
 -- | Abstraction of a neural network component
-class (Typeable a, Applicative (Run a)) => Component (a :: * -> *) where
+class (Typeable a, Monad (Run a)) => Component (a :: * -> *) where
   type Dty a :: *
   -- | execution environment
   type Run a :: * -> *
@@ -92,6 +89,18 @@ class Evaluator a where
   eval :: a -> Val a -> IO (Val a)
   cost :: a -> Val a -> Val a -> IO (Val a)
 
+class Data a => Optimizer a where
+  data OptVar a b
+  type OptCst a :: * -> Constraint
+  newOptVar :: OptCst a b => a -> b -> IO (OptVar a b)
+  optimize  :: OptCst a b => OptVar a b -> b -> IO b
+
+data SpecEvaluator = MeanSquaredError | SoftmaxCrossEntropy
+  deriving (Typeable, Data)
+
+data SpecOptimizer = ScaleGrad Float | ADAGrad | ADAM
+  deriving (Typeable, Data)
+
 -- translate the body of specification
 class MonadError ErrCode (Env b) => BodyTrans b s where
   type SpecToCom b s :: * -> *
@@ -113,16 +122,16 @@ class Backend b where
   -- | constraints of optimizable type, restricting the possible optimizer passed to 'compile'
   type Optimizable b o :: Constraint
   -- | result type of 'compile'
-  type Compilable  b s e     :: Constraint
+  type Compilable  b s      :: Constraint
   type CompileComponent b s :: * -> *
-  type CompileEvaluator b s :: *
-  type CompileOptimizer b o :: *
+  type CompileEvaluator b   :: *
+  type CompileOptimizer b   :: *
   -- | necessary constraints of the resulting type
-  witness :: (Optimizer o, Compilable b s e) =>
-             b -> o -> e -> s -> Dict (Monad (Env b),
-                                       ModelCst (CompileComponent b s) (CompileEvaluator b e))
+  witness :: (Optimizer o, Compilable b s) =>
+             b -> o -> e -> s -> Dict (Monad (Env b), Optimizer (CompileOptimizer b),
+                                       ModelCst (CompileComponent b s) (CompileEvaluator b))
   -- | compile the specification to runnable component.
-  compile :: (InputLayer i, Compilable b s e, Optimizer o, Optimizable b o) =>
-             b -> o -> e -> i -> s -> Env b ((CompileComponent b s o), (CompileEvaluator b e))
+  compile :: (InputLayer i, Compilable b s, Optimizer o, Optimizable b o) =>
+             b -> o -> SpecEvaluator -> i -> s -> Env b ((CompileComponent b s o), (CompileEvaluator b))
   -- | make a optimizer
-  mkopt   :: b -> o -> Env b (CompileOptimizer b o)
+  mkopt   :: b -> SpecOptimizer -> Env b (CompileOptimizer b)

@@ -281,6 +281,7 @@ instance Show (Op t v) where
   show (a :<> b) = ":<>"
   show (a :## b) = ":##"
   show (a :.* b) = ":.*"
+  show (a :.+ b) = ":.+"
   show (Scale a) = "Scale"
   show (Apply a) = "Apply"
   show (ZipWith a b c) = "ZipWith"
@@ -403,11 +404,15 @@ instance (Numeric a, V.Storable a, SIMDable a) => AssignTo DenseMatrixArray a wh
   ma <<= UnsafeM2MA op = let ma2m (DenseMatrixArray n r c v) = DenseMatrix n (r*c) v
                          in (ma2m ma) <<= op
   ma <<= Scale' r (UnsafeM2MA op) = ma <<= UnsafeM2MA (Scale' r op)
-  _ <<= _ = error "Unsupported Op [MatrixArray <<=]."
+  ma <<= Scale r = ma2v ma <<= Scale r
+  ma <<= mb :.+ mc = ma2v ma <<= ma2v mb :.+ ma2v mc
+  ma <<= mb :.* mc = ma2v ma <<= ma2v mb :.* ma2v mc
+  _ <<= op = error $ "Unsupported Op [MatrixArray <<=" ++ show op ++ "]."
+
   ma <<+ UnsafeM2MA op = let ma2m (DenseMatrixArray n r c v) = DenseMatrix n (r*c) v
                          in (ma2m ma) <<+ op
   ma <<+ Scale' r (UnsafeM2MA op) = ma <<+ UnsafeM2MA (Scale' r op)
-  _ <<+ _ = error "Unsupported Op [MatrixArray <<+]."
+  _ <<+ op = error $ "Unsupported Op [MatrixArray <<+" ++ show op ++ "]."
 
 -- | sum up all elements in the 'DenseMatrix'
 sumElements :: (V.Storable a, Num a, MonadIO m) => DenseMatrix a -> m a

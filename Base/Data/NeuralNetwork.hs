@@ -24,8 +24,6 @@ module Data.NeuralNetwork (
   SpecLSTM(..),
   SpecFlow(..),
   SpecMeanPooling(..),
-  SpecEvaluator(..),
-  SpecOptimizer(..),
   module Data.NeuralNetwork.Common
 ) where
 
@@ -105,12 +103,6 @@ data SpecLSTM = LSTM Int
   deriving (Typeable, Data)
 
 data SpecFlow a = Flow a
-  deriving (Typeable, Data)
-
-data SpecEvaluator = MeanSquaredError | SoftmaxCrossEntropy
-  deriving (Typeable, Data)
-
-data SpecOptimizer = ScaleGrad Float | ADAGrad | ADAM
   deriving (Typeable, Data)
 
 instance InputLayer SpecInStream where

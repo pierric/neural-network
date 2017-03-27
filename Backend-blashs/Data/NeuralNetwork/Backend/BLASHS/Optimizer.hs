@@ -12,7 +12,7 @@
 -- This module supplies a simple optimizer.
 ------------------------------------------------------------
 module Data.NeuralNetwork.Backend.BLASHS.Optimizer (
-  BlasOptimizer
+  BlasOptimizer(..)
 ) where
 
 import Data.Data
