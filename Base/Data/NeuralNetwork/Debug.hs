@@ -16,6 +16,7 @@
 module Data.NeuralNetwork.Debug where
 
 import Data.Data
+import Data.Constraint (Dict(..), withDict)
 import Control.Monad.Trans (liftIO, MonadIO)
 import Control.Monad.Except (MonadError)
 import Text.PrettyPrint.Free hiding ((</>))
@@ -29,7 +30,7 @@ type Debug a = Adapter IO a a ()
 instance BodySize (SpecDebug a) where
   bsize s (Debug _) = s
 
-instance (Pretty a, MonadIO (Env b), MonadError ErrCode (Env b)) => BodyTrans b (SpecDebug a) where
+instance (Typeable a, Pretty a, MonadIO (Env b), MonadError ErrCode (Env b)) => BodyTrans b (SpecDebug a) where
   type SpecToCom b (SpecDebug a) = Debug a
   btrans b o s (Debug name) = return $ Adapter to back
     where
@@ -37,5 +38,6 @@ instance (Pretty a, MonadIO (Env b), MonadError ErrCode (Env b)) => BodyTrans b 
                   liftIO $ putStrLn $ showPretty $ indent 2 $ pretty inp
                   return ((), inp)
       back _ odelta = return odelta
+  bwitness b o s = Dict
 
 showPretty x = displayS (renderPretty 0.4 500 x) ""

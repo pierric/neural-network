@@ -11,11 +11,13 @@
 --
 -- This module defines an general adapter component.
 ------------------------------------------------------------
+{-# LANGUAGE DataKinds #-}
 module Data.NeuralNetwork.Adapter (
   Adapter(..)
 ) where
 
 import Data.Data
+import GHC.TypeLits
 import Data.NeuralNetwork
 
 data Adapter m i o e t = Adapter (i -> m (e,o)) (e -> o -> m i)
@@ -33,6 +35,7 @@ adapterDataType :: DataType
 adapterDataType = mkDataType "Data.NeuralNetwork.Adapter" [adapterConstr]
 
 instance (Monad m, Typeable m, Typeable i, Typeable o, Typeable e) => Component (Adapter m i o e) where
+  type Dty (Adapter m i o e) = TypeError (Text "Dty of Adapter is not used")
   type Run (Adapter m i o e) = m
   type Inp (Adapter m i o e) = i
   type Out (Adapter m i o e) = o
