@@ -74,3 +74,6 @@ prop_no_read_tensor_after_write_var st t vid =
       rt  = map fst $ filter (getAny . (mconcat $ map ((Any .) . read_of_var) $ bind_of_tensor t st) . snd) ist
       wv  = map fst $ filter (write_of_var vid . snd) ist
   in null wv || null rt || minimum wv > maximum rt
+
+prop_only_make_var :: [Statement] -> Bool
+prop_only_make_var = and . map isMake . concatMap varUsage
