@@ -11,15 +11,20 @@ import Data.Typeable (cast)
 -- import Text.PrettyPrint.Free (pretty)
 
 data OptError = NotEligible | Continue [Statement] [Statement]
-type Optimizer = [Statement] -> ExceptT OptError Identity [Statement]
-run_opt :: Optimizer -> [Statement] -> [Statement]
-run_opt act st =
-  case runIdentity $ runExceptT (act st) of
-    Left NotEligible        -> st
-    Left (Continue st1 st2) -> st1 ++ run_opt act st2
-    Right st1               -> st1
+type OptMR = StateT CGState IO
+type OptimizerR = [Statement] -> OptMR [Statement]
+type OptMP = ExceptT OptError OptMR
+type OptimizerP = [Statement] -> OptMP [Statement]
 
-opt_rewrite_alloc_store_as_bind :: Optimizer
+run_opt :: OptimizerP -> OptimizerR
+run_opt act st = do
+  r <- runExceptT (act st)
+  case r of
+    Left NotEligible        -> return $ st
+    Left (Continue st1 st2) -> run_opt act st2 >>= return . (st1 ++)
+    Right st1               -> return $ st1
+
+opt_rewrite_alloc_store_as_bind :: OptimizerP
 opt_rewrite_alloc_store_as_bind st = do
   let (st1, st2) = break isAlloc st
   when (null st2) $ throwError NotEligible
@@ -34,7 +39,7 @@ opt_rewrite_alloc_store_as_bind st = do
           case cast x of
             Just x' -> return $ st1 ++ [Bind v x'] ++ st4 ++ st6
 
-opt_remove_synonym :: Optimizer
+opt_remove_synonym :: OptimizerP
 opt_remove_synonym st = do
   let (st1, st2) = break isBind st
   when (null st2) $ throwError NotEligible
@@ -48,7 +53,7 @@ opt_remove_synonym st = do
             Nothing -> error "Binding a tensor with variables of different dimensions!"
             Just v' -> return $ st1 ++ [Bind v t] ++ st4 ++ substitute v' v st6
 
-opt_absorb_gemv_dotadd :: Optimizer
+opt_absorb_gemv_dotadd :: OptimizerP
 opt_absorb_gemv_dotadd st =
   lookfor st isGEMV (\(BlasGEMV _ _ _ _ _ _ v3) -> isDotScaTo $ _vid v3) $
     \st1 g@(BlasGEMV o t v1 v2 a b v3) st4 st5 -> do
@@ -87,7 +92,7 @@ opt_absorb_gemv_dotadd st =
   --           else
   --             throwError $ Continue (st1 ++ [head st2]) (tail st2)
 
-opt_absorb_gemv_dotsca :: Optimizer
+opt_absorb_gemv_dotsca :: OptimizerP
 opt_absorb_gemv_dotsca st =
   lookfor st isGEMV (\(BlasGEMV _ _ _ _ _ _ v3) -> isDotScaTo $ _vid v3) $
     \st1 g@(BlasGEMV o t v1 v2 a b v3) st4 st5 -> do
@@ -112,7 +117,7 @@ opt_absorb_gemv_dotsca st =
   --           Nothing -> error "This should not happen: types do not agree"
   --           Just c  -> return $ st1 ++ st4 ++ copy v4 v6 ++ [BlasGEMV o t v1 v2 (c*a) (c*b) (v3{_vid = _vid v6})] ++ st6
 
-opt_absorb_gemm_dotadd :: Optimizer
+opt_absorb_gemm_dotadd :: OptimizerP
 opt_absorb_gemm_dotadd st =
   lookfor st isGEMM (\(BlasGEMM _ _ _ _ _ _ _ v3) -> isDotAddTo $ _vid v3) $
     \st1 g@(BlasGEMM o t1 v1 t2 v2 a b v3) st4 st5 -> do
@@ -151,7 +156,7 @@ opt_absorb_gemm_dotadd st =
   --           else
   --             throwError $ Continue (st1 ++ [head st2]) (tail st2)
 
-opt_absorb_gemm_dotsca :: Optimizer
+opt_absorb_gemm_dotsca :: OptimizerP
 opt_absorb_gemm_dotsca st =
   lookfor st isGEMV (\(BlasGEMM _ _ _ _ _ _ _ v3) -> isDotScaTo $ _vid v3) $
     \st1 g@(BlasGEMM o t1 v1 t2 v2 a b v3) st4 st5 -> do

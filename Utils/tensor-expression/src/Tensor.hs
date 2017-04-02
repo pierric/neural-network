@@ -5,6 +5,7 @@ module Tensor(
   isGEMV, isGERU, isGEMM,
   isDotAdd, isDotAddTo, isDotSca, isDotScaTo,
   newTensor, tensor_eq,
+  CGState,
   compile, substitute,
 ) where
 
@@ -16,6 +17,7 @@ import Data.Typeable (cast)
 import Control.Monad.State
 import Control.Monad.Except
 import Data.Data
+import qualified Data.Map.Strict as M
 import Text.Printf
 import Text.PrettyPrint.Free (Pretty(..), Doc, fill, text, hsep, vcat, (<+>))
 
@@ -144,7 +146,7 @@ data CGError = CGSizeMismatchedTensors
   deriving Show
 type CGState = Int
 
-newVar :: d -> CG (Var d a)
+newVar :: MonadState CGState m => d -> m (Var d a)
 newVar d = do
   i <- get
   modify (+1)
@@ -208,8 +210,63 @@ compile (a :%# b) = do
       v3 <- newVar (D2 m n)
       return (s1 ++ s2 ++ [Alloc v3, BlasGEMM ColumnMajor Trans v1 NoTrans v2 1 0 v3], v3)
 
+data TensorWrap where
+  TensorWrap :: (Dimension d, Element a) => Tensor d a -> TensorWrap
+type EvalS = M.Map Int TensorWrap
+type EvalM = ExceptT EvalE (StateT EvalS IO)
+data EvalE = CannotAlloc | CannotBind | CannotStore | CannotCopy
+
+evaluate :: [Statement] -> IO (Either EvalE ())
+evaluate ss = evalStateT (runExceptT $ eval ss) M.empty
+  where
+    eval [] = return ()
+    eval (s:ss) = do
+      case s of
+        Alloc v -> do
+          m <- get
+          if M.member (_vid v) m
+            then throwError CannotAlloc
+            else do
+              let newTensor' :: (Dimension d, Element a) => Var d a -> IO (Tensor d a)
+                  newTensor' v = newTensor (_vdim v)
+              t <- liftIO $ newTensor' v
+              put $ M.insert (_vid v) (TensorWrap t) m
+        Bind  v t -> do
+          m <- get
+          if M.member (_vid v) m
+            then throwError CannotBind
+            else put $ M.insert (_vid v) (TensorWrap t) m
+        Store v t -> do
+          m <- get
+          case M.lookup (_vid v) m of
+            Just tw | TensorWrap tt <- tw
+                    , size (_tdim tt) == size (_vdim v)
+                    , Just tt' <- cast tt
+                    -> liftIO $ copyTensor tt' t
+            _       -> throwError CannotStore
+        Copy  v w -> do
+          m <- get
+          let vt = M.lookup (_vid v) m
+              wt = M.lookup (_vid w) m
+          case (vt, wt) of
+            _ | Just (TensorWrap vt) <- vt
+              , Just (TensorWrap wt) <- wt
+              , Just vt' <- cast vt
+              -> liftIO $ copyTensor vt' wt
+            _ -> throwError CannotCopy
+        BlasGEMV o t v w a b u -> undefined
+        BlasGERU o v w a u -> undefined
+        BlasGEMM o t1 v1 t2 v2 a b w -> undefined
+        DotAdd v w u -> undefined
+        DotMul v w u -> undefined
+        DotSca a v w -> undefined
+      eval ss
+
 newTensor :: (Dimension d, Element a) => d -> IO (Tensor d a)
 newTensor d = Tensor d <$> V.new (size d)
+
+copyTensor :: (Dimension d, Element a) => Tensor d a -> Tensor d a -> IO ()
+copyTensor (Tensor d1 a) (Tensor d2 b) = V.copy b a
 
 tensor_eq :: (Dimension d1, Dimension d2) => Tensor d1 a1 -> Tensor d2 a2 -> Bool
 tensor_eq (Tensor d1 (V.MVector o1 p1)) (Tensor d2 (V.MVector o2 p2)) =
