@@ -1,6 +1,6 @@
-module Prop where
+module Data.Tensor.Prop where
 
-import Tensor
+import Data.Tensor
 import qualified Data.Set as S
 import Control.Monad.Except
 import Control.Monad.State

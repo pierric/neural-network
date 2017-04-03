@@ -26,9 +26,9 @@ library
     ghc-options:       -fllvm
   else
     hs-source-dirs:    src, vecnone
-  exposed-modules:     Tensor,
-                       Prop,
-                       Optimize,
+  exposed-modules:     Data.Tensor,
+                       Data.Tensor.Prop,
+                       Data.Tensor.Optimize,
                        Data.Tensor.SIMD
   build-depends:       base >= 4.7 && < 5, vector, mtl, containers, wl-pprint-extras, ghc-prim,
                        blas-hs >= 0.1.1.0

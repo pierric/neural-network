@@ -1,7 +1,7 @@
-module Optimize where
+module Data.Tensor.Optimize where
 
-import Tensor
-import Prop
+import Data.Tensor
+import Data.Tensor.Prop
 import Control.Monad.Except
 import Control.Monad.State
 import Control.Monad.Identity
