@@ -9,15 +9,29 @@ author:              Jiasen Wu
 maintainer:          jiasenwu@hotmail.com
 copyright:           2017 Jiasen Wu
 category:            AI
-build-type:          Simple
+build-type:          Custom
 cabal-version:       >=1.10
 
+custom-setup
+  setup-depends:     base >= 4.7 && < 5, Cabal >= 1.24.0.0, filepath >= 1.4.0.0, directory >= 1.2.0.0
+
+flag vec128
+  Description: Enable 128-bit vector hardware instructions.
+  Default:     False
+  Manual:      True
+
 library
-  hs-source-dirs:      src
+  if flag(vec128)
+    hs-source-dirs:    src, vec128
+    ghc-options:       -fllvm
+  else
+    hs-source-dirs:    src, vecnone
   exposed-modules:     Tensor,
                        Prop,
-                       Optimize
-  build-depends:       base >= 4.7 && < 5, vector, mtl, containers, wl-pprint-extras
+                       Optimize,
+                       Data.Tensor.SIMD
+  build-depends:       base >= 4.7 && < 5, vector, mtl, containers, wl-pprint-extras, ghc-prim,
+                       blas-hs >= 0.1.1.0
   default-language:    Haskell2010
   default-extensions:  GADTs, BangPatterns, TypeOperators, KindSignatures,
                        StandaloneDeriving, DeriveDataTypeable, FlexibleContexts

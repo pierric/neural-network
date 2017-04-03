@@ -1,4 +1,5 @@
-module Tensor(
+{-# LANGUAGE ScopedTypeVariables #-}
+module Data.Tensor(
   Dimension(..), Tensor(..), Expr(..), Var(..), Statement(..),
   D1(..), D2(..), D3(..),
   isAlloc, isBind, isBindToTensor, isStore, isStoreTo,
@@ -9,7 +10,6 @@ module Tensor(
   compile, substitute,
 ) where
 
--- import Blas.Generic.Unsafe
 import qualified Data.Vector.Storable.Mutable  as V
 import qualified Data.Vector.Storable.Internal as V
 import Foreign.ForeignPtr (castForeignPtr)
@@ -20,9 +20,9 @@ import Data.Data
 import qualified Data.Map.Strict as M
 import Text.Printf
 import Text.PrettyPrint.Free (Pretty(..), Doc, fill, text, hsep, vcat, (<+>))
-
-data Order     = RowMajor | ColumnMajor
-data Transpose = Trans | NoTrans
+import Blas.Generic.Safe
+import Blas.Primitive.Types (Order(..), Transpose(..))
+import Data.Tensor.SIMD
 
 data D1 = D1 {-# UNPACK #-}!Int
   deriving (Typeable, Data, Eq, Show)
@@ -41,7 +41,7 @@ instance Dimension D2 where
 instance Dimension D3 where
   size (D3 a b c) = a * b * c
 
-class (Show a, Num a, Eq a, Typeable a, V.Storable a) => Element a
+class (Show a, Num a, Eq a, Typeable a, V.Storable a, SIMDable a, Numeric a) => Element a
 
 instance Element Float
 
@@ -208,13 +208,13 @@ compile (a :%# b) = do
     then throwError CGSizeMismatchedTensors
     else do
       v3 <- newVar (D2 m n)
-      return (s1 ++ s2 ++ [Alloc v3, BlasGEMM ColumnMajor Trans v1 NoTrans v2 1 0 v3], v3)
+      return (s1 ++ s2 ++ [Alloc v3, BlasGEMM ColMajor Trans v1 NoTrans v2 1 0 v3], v3)
 
 data TensorWrap where
   TensorWrap :: (Dimension d, Element a) => Tensor d a -> TensorWrap
 type EvalS = M.Map Int TensorWrap
 type EvalM = ExceptT EvalE (StateT EvalS IO)
-data EvalE = CannotAlloc | CannotBind | CannotStore | CannotCopy
+data EvalE = Fail Statement
 
 evaluate :: [Statement] -> IO (Either EvalE ())
 evaluate ss = evalStateT (runExceptT $ eval ss) M.empty
@@ -222,19 +222,17 @@ evaluate ss = evalStateT (runExceptT $ eval ss) M.empty
     eval [] = return ()
     eval (s:ss) = do
       case s of
-        Alloc v -> do
+        Alloc (v :: Var d a) -> do
           m <- get
           if M.member (_vid v) m
-            then throwError CannotAlloc
+            then throwError $ Fail s
             else do
-              let newTensor' :: (Dimension d, Element a) => Var d a -> IO (Tensor d a)
-                  newTensor' v = newTensor (_vdim v)
-              t <- liftIO $ newTensor' v
+              (t :: Tensor d a) <- liftIO $ newTensor (_vdim v)
               put $ M.insert (_vid v) (TensorWrap t) m
         Bind  v t -> do
           m <- get
           if M.member (_vid v) m
-            then throwError CannotBind
+            then throwError $ Fail s
             else put $ M.insert (_vid v) (TensorWrap t) m
         Store v t -> do
           m <- get
@@ -243,7 +241,7 @@ evaluate ss = evalStateT (runExceptT $ eval ss) M.empty
                     , size (_tdim tt) == size (_vdim v)
                     , Just tt' <- cast tt
                     -> liftIO $ copyTensor tt' t
-            _       -> throwError CannotStore
+            _       -> throwError $ Fail s
         Copy  v w -> do
           m <- get
           let vt = M.lookup (_vid v) m
@@ -253,14 +251,83 @@ evaluate ss = evalStateT (runExceptT $ eval ss) M.empty
               , Just (TensorWrap wt) <- wt
               , Just vt' <- cast vt
               -> liftIO $ copyTensor vt' wt
-            _ -> throwError CannotCopy
-        BlasGEMV o t v w a b u -> undefined
-        BlasGERU o v w a u -> undefined
-        BlasGEMM o t1 v1 t2 v2 a b w -> undefined
-        DotAdd v w u -> undefined
-        DotMul v w u -> undefined
-        DotSca a v w -> undefined
+            _ -> throwError $ Fail s
+        BlasGEMV o t v w a b u ->
+          dotop2 (throwError $ Fail s) v w u (\tx ty tz -> liftIO $
+            V.unsafeWith (_tdat tx) (\px ->
+            V.unsafeWith (_tdat ty) (\py ->
+            V.unsafeWith (_tdat tz) (\pz ->
+              let (D2 row col) = _vdim v
+                  lda = case o of
+                          RowMajor -> col
+                          ColMajor -> row
+              in gemv o t row col a px lda py 1 b pz 1))))
+        BlasGERU o v w a u ->
+          dotop2 (throwError $ Fail s) v w u (\tx ty tz -> liftIO $
+            V.unsafeWith (_tdat tx) (\px ->
+            V.unsafeWith (_tdat ty) (\py ->
+            V.unsafeWith (_tdat tz) (\pz ->
+              let D1 row = _vdim v
+                  D1 col = _vdim w
+                  lda = case o of
+                          RowMajor -> col
+                          ColMajor -> row
+              in geru o row col a px 1 py 1 pz lda))))
+        BlasGEMM o t1 v1 t2 v2 a b w ->
+          dotop2 (throwError $ Fail s) v1 v2 w (\tx ty tz -> liftIO $
+            V.unsafeWith (_tdat tx) (\px ->
+            V.unsafeWith (_tdat ty) (\py ->
+            V.unsafeWith (_tdat tz) (\pz ->
+              let D2 r1 c1 = _vdim v1
+                  D2 r2 c2 = _vdim v2
+                  (m,k,lda,n,ldb) = case (o,t1,t2) of
+                                      (RowMajor,   Trans,   Trans) -> (c1, r1, r1, r2, r2)
+                                      (RowMajor,   Trans, NoTrans) -> (c1, r1, r1, c2, r2)
+                                      (RowMajor, NoTrans,   Trans) -> (r1, c1, r1, r2, r2)
+                                      (RowMajor, NoTrans, NoTrans) -> (r1, c1, r1, c2, r2)
+                                      (ColMajor,   Trans,   Trans) -> (r1, c1, c1, c2, c2)
+                                      (ColMajor,   Trans, NoTrans) -> (r1, c1, c1, r2, c2)
+                                      (ColMajor, NoTrans,   Trans) -> (c1, r1, c1, c2, c2)
+                                      (ColMajor, NoTrans, NoTrans) -> (c1, r1, c1, r2, c2)
+              in gemm o t1 t2 m n k a px lda py ldb b pz m))))
+        DotAdd v w u -> dotop2 (throwError $ Fail s) v w u (\tv tw tu -> liftIO $
+                          hadamard plus  (_tdat tu) (_tdat tv) (_tdat tw))
+        DotMul v w u -> dotop2 (throwError $ Fail s) v w u (\tv tw tu -> liftIO $
+                          hadamard times (_tdat tu) (_tdat tv) (_tdat tw))
+        DotSca a v w -> dotop1 (throwError $ Fail s) v w (\tv tw -> liftIO $
+                          foreach (times (konst a)) (_tdat tw) (_tdat tv))
       eval ss
+
+    dotop1 :: forall d1 d2 a b. (Dimension d1, Dimension d2, Element a) =>
+              EvalM b -> Var d1 a -> Var d2 a -> (Tensor d1 a -> Tensor d2 a -> EvalM b) -> EvalM b
+    dotop1 e v w o = do
+      m <- get
+      let vt = M.lookup (_vid v) m
+          wt = M.lookup (_vid w) m
+      case (vt, wt) of
+        _ | Just (TensorWrap vt) <- vt
+          , Just (TensorWrap wt) <- wt
+          , Just (vt' :: Tensor d1 a) <- cast vt
+          , Just (wt' :: Tensor d2 a) <- cast wt
+          -> o vt' wt'
+        _ -> e
+
+    dotop2 :: forall d1 d2 d3 a b. (Dimension d1, Dimension d2, Dimension d3, Element a) =>
+              EvalM b -> Var d1 a -> Var d2 a -> Var d3 a -> (Tensor d1 a -> Tensor d2 a -> Tensor d3 a -> EvalM b) -> EvalM b
+    dotop2 e u v w o = do
+      m <- get
+      let ut = M.lookup (_vid u) m
+          vt = M.lookup (_vid v) m
+          wt = M.lookup (_vid w) m
+      case (ut, vt, wt) of
+        _ | Just (TensorWrap ut) <- ut
+          , Just (TensorWrap vt) <- vt
+          , Just (TensorWrap wt) <- wt
+          , Just (ut' :: Tensor d1 a) <- cast ut
+          , Just (vt' :: Tensor d2 a) <- cast vt
+          , Just (wt' :: Tensor d3 a) <- cast wt
+          -> o ut' vt' wt'
+        _ -> e
 
 newTensor :: (Dimension d, Element a) => d -> IO (Tensor d a)
 newTensor d = Tensor d <$> V.new (size d)
