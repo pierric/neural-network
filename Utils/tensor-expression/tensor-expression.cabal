@@ -27,7 +27,9 @@ library
   else
     hs-source-dirs:    src, vecnone
   exposed-modules:     Data.Tensor,
+                       Data.Tensor.Class,
                        Data.Tensor.Prop,
+                       Data.Tensor.Compile,
                        Data.Tensor.Optimize,
                        Data.Tensor.SIMD
   build-depends:       base >= 4.7 && < 5, vector, mtl, containers, wl-pprint-extras, ghc-prim,
@@ -35,3 +37,9 @@ library
   default-language:    Haskell2010
   default-extensions:  GADTs, BangPatterns, TypeOperators, KindSignatures,
                        StandaloneDeriving, DeriveDataTypeable, FlexibleContexts
+
+test-suite simple
+  type:               exitcode-stdio-1.0
+  main-is:            test/simple.hs
+  build-depends:      hspec, QuickCheck, base >= 4.7 && < 5, tensor-expression
+  default-language:   Haskell2010
