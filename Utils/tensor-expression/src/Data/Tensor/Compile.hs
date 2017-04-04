@@ -22,6 +22,8 @@ import Data.Tensor.SIMD
 import qualified Data.Vector.Storable.Mutable  as V
 import qualified Data.Vector.Storable.Internal as V
 
+import Foreign.Marshal.Array
+
 data Expr d a where
   I :: Tensor d a -> Expr d a
   -- S :: a -> Expr d a -> Expr d a
@@ -174,10 +176,10 @@ compile (a :#> b) = do
   (s2, v2) <- compile b
   let d1@(D2 m n) = _vdim v1
       d2@(D1 k)   = _vdim v2
-  if k /= m
+  if n /= k
     then throwError CGSizeMismatchedTensors
     else do
-      v3 <- newVar (D1 n)
+      v3 <- newVar (D1 m)
       return (s1 ++ s2 ++ [Alloc v3, BlasGEMV RowMajor NoTrans v1 v2 1 0 v3], v3)
 compile (a :<> b) = do
   (s1, v1) <- compile a
@@ -245,22 +247,22 @@ evaluate ss = evalStateT (runExceptT $ eval ss) M.empty
             V.unsafeWith (_tdat tx) (\px ->
             V.unsafeWith (_tdat ty) (\py ->
             V.unsafeWith (_tdat tz) (\pz ->
-              let (D2 row col) = _vdim v
-                  lda = case o of
-                          RowMajor -> col
-                          ColMajor -> row
-              in gemv o t row col a px lda py 1 b pz 1))))
+              let (D2 r c) = _vdim v
+                  (m,n,lda) = case o of
+                                RowMajor -> (r,c,c)
+                                ColMajor -> (c,r,c)
+              in gemv o t m n a px lda py 1 b pz 1))))
         BlasGERU o v w a u ->
           dotop2 (throwError $ Fail s) v w u (\tx ty tz -> liftIO $
             V.unsafeWith (_tdat tx) (\px ->
             V.unsafeWith (_tdat ty) (\py ->
             V.unsafeWith (_tdat tz) (\pz ->
-              let D1 row = _vdim v
-                  D1 col = _vdim w
-                  lda = case o of
-                          RowMajor -> col
-                          ColMajor -> row
-              in geru o row col a px 1 py 1 pz lda))))
+              let D1 r = _vdim v
+                  D1 c = _vdim w
+                  (m,n,lda) = case o of
+                                RowMajor -> (r, c, r)
+                                ColMajor -> (c, r, c)
+              in geru o m n a px 1 py 1 pz lda))))
         BlasGEMM o t1 v1 t2 v2 a b w ->
           dotop2 (throwError $ Fail s) v1 v2 w (\tx ty tz -> liftIO $
             V.unsafeWith (_tdat tx) (\px ->
@@ -316,3 +318,7 @@ evaluate ss = evalStateT (runExceptT $ eval ss) M.empty
           , Just (wt' :: Tensor d3 a) <- cast wt
           -> o ut' vt' wt'
         _ -> e
+
+dump ptr sz = do
+  fs <- peekArray sz ptr
+  print fs
