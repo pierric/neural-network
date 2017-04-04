@@ -40,7 +40,7 @@ write_of_var vid s = Write vid `elem` varUsage s
 bind_of_tensor :: Dimension d => Tensor d a -> [Statement] -> [Int]
 bind_of_tensor t st = catMaybes $ map match st
   where
-    match (Bind v t1) = if tensor_eq t t1 then Just (_vid v) else Nothing
+    match (Bind v t1) = if eqTensor t t1 then Just (_vid v) else Nothing
     match _           = Nothing
 
 prop_no_make_twice st = isRight $ runIdentity $ runExceptT $ runStateT (check st) S.empty

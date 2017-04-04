@@ -1,5 +1,6 @@
 module Data.Tensor.Class where
 
+import qualified Data.Vector.Storable as PV
 import qualified Data.Vector.Storable.Mutable  as V
 import qualified Data.Vector.Storable.Internal as V
 import Foreign.ForeignPtr (castForeignPtr)
@@ -40,6 +41,11 @@ newTensor d = Tensor d <$> V.new (size d)
 copyTensor :: (Dimension d, Element a) => Tensor d a -> Tensor d a -> IO ()
 copyTensor (Tensor d1 a) (Tensor d2 b) = V.copy b a
 
-tensor_eq :: (Dimension d1, Dimension d2) => Tensor d1 a1 -> Tensor d2 a2 -> Bool
-tensor_eq (Tensor d1 (V.MVector o1 p1)) (Tensor d2 (V.MVector o2 p2)) =
+packTensor :: (Dimension d, Element a) => d -> PV.Vector a -> IO (Tensor d a)
+packTensor d v = if PV.length v < size d then error "cannot pack tensor" else do
+  v <- PV.unsafeThaw v
+  return $ Tensor d v
+
+eqTensor :: (Dimension d1, Dimension d2) => Tensor d1 a1 -> Tensor d2 a2 -> Bool
+eqTensor (Tensor d1 (V.MVector o1 p1)) (Tensor d2 (V.MVector o2 p2)) =
   size d1 == size d2 && o1 == o2 && p1 == castForeignPtr p2

@@ -1,11 +1,12 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Data.Tensor.Compile(
-  Expr(..), Var(..), Statement(..),
+  Expr(..), dim,
+  Var(..), Statement(..),
   isAlloc, isBind, isBindToTensor, isStore, isStoreTo,
   isGEMV, isGERU, isGEMM,
   isDotAdd, isDotAddTo, isDotSca, isDotScaTo,
-  CGState,
-  compile, substitute,
+  CGState, EvalE,
+  runCG, compile, substitute, evaluate
 ) where
 
 import Data.Tensor.Class
@@ -32,6 +33,15 @@ data Expr d a where
   (:%#) :: Expr D2 a -> Expr D2 a -> Expr D2 a
   (:<>) :: Expr D1 a -> Expr D1 a -> Expr D2 a
 
+dim :: Expr d a -> d
+dim (I t)     = _tdim t
+dim (a :.* b) = dim a
+dim (a :.+ b) = dim b
+dim (a :<# b) = let D2 _ c = dim b in D1 c
+dim (a :#> b) = let D2 r _ = dim a in D1 r
+dim (a :%# b) = let (D2 r1 _, D2 r2 _) = (dim a, dim b) in D2 r2 r1
+dim (a :<> b) = let (D1 r, D1 c) = (dim a, dim b) in D2 r c
+
 data Var d a = Var {
   _vdim :: d,
   _vid  :: Int
@@ -54,7 +64,7 @@ isAlloc _         = False
 
 isBind (Bind{}) = True
 isBind _          = False
-isBindToTensor t1 s | Bind _ t2 <- s, tensor_eq t1 t2 = True
+isBindToTensor t1 s | Bind _ t2 <- s, eqTensor t1 t2 = True
                     | otherwise = False
 
 isStore (Store{}) = True
@@ -112,10 +122,16 @@ instance Pretty Statement where
   pretty (DotMul v1 v2 v3)               = fill 8 (text "Mul")  <+> hsep (map text [show v1, show v2, show v3])
   pretty (DotSca a  v1 v2)               = fill 8 (text "Sca")  <+> hsep (map text [show a , show v1, show v2])
 
+instance Show Statement where
+  show = show . pretty
+
 type CG = StateT CGState (ExceptT CGError IO)
 data CGError = CGSizeMismatchedTensors
-  deriving Show
+  deriving (Eq, Show)
 type CGState = Int
+
+runCG :: CGState -> CG a -> IO (Either CGError (a, CGState))
+runCG cg act = runExceptT (runStateT act cg )
 
 newVar :: MonadState CGState m => d -> m (Var d a)
 newVar d = do
@@ -186,6 +202,7 @@ data TensorWrap where
 type EvalS = M.Map Int TensorWrap
 type EvalM = ExceptT EvalE (StateT EvalS IO)
 data EvalE = Fail Statement
+  deriving (Show)
 
 evaluate :: [Statement] -> IO (Either EvalE ())
 evaluate ss = evalStateT (runExceptT $ eval ss) M.empty

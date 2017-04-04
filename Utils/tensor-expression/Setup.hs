@@ -33,22 +33,16 @@ myBuildHook pkgdesc binfo uh bf = do
       let slib = buildroot </> ("lib" ++ vecmod ++ ".a")
       createArLibArchive verb binfo slib [sobj]
       extralib <- canonicalizePath buildroot
-      let pkgdesc' = updatePackageDescription (Nothing, [("t1", libBI)]) pkgdesc
-          libBI    = emptyBuildInfo {extraLibs = [vecmod], extraLibDirs = [extralib]}
+      -- modify each of the test suits, so that the LL code is linked in.
+      let pkgdesc' = updatePD (vecmod, extralib) pkgdesc
       buildHook simpleUserHooks pkgdesc' binfo uh bf
-      -- however the library is static and doesn't include the vecmod
-      -- we will then explicitly to insert it.
-      let unitId  = componentUnitId (getComponentLocalBuildInfo binfo CLibName)
-          vlibPath = buildroot </> mkLibName     unitId
-          plibPath = buildroot </> mkProfLibName unitId
-          whenVanillaLib = when (withVanillaLib binfo)
-          whenProfLib    = when (withProfLib binfo)
-          Platform hostArch hostOS = hostPlatform binfo
-          args    = case hostOS of
-                       OSX -> ["-q", "-s"]
-                       _   -> ["-q"]
-      (ar, _) <- requireProgram verb arProgram (withPrograms binfo)
-      whenVanillaLib $
-        runProgramInvocation verb $ programInvocation ar (args ++ [vlibPath, sobj])
-      whenProfLib $
-        runProgramInvocation verb $ programInvocation ar (args ++ [plibPath, sobj])
+
+updatePD :: (String, String) -> PackageDescription -> PackageDescription
+updatePD (extraLib, extraDir) p
+    = p{ library     = updateLibrary     (library     p)
+      --  , executables = updateExecutables (executables p)
+       }
+    where
+      bi = emptyBuildInfo {extraLibs = [extraLib], extraLibDirs = [extraDir]}
+      updateLibrary     = fmap (\lib -> lib {libBuildInfo = bi `mappend` libBuildInfo lib})
+      -- updateExecutables = map  (\exe -> exe {buildInfo = bi `mappend` buildInfo exe})
