@@ -6,7 +6,7 @@ module Data.Tensor.Compile(
   isGEMV, isGERU, isGEMM,
   isDotAdd, isDotAddTo, isDotSca, isDotScaTo,
   CGState, EvalE,
-  runCG, compile, substitute, evaluate
+  runCG, compile, substitute, execute,
 ) where
 
 import Data.Tensor.Class
@@ -23,6 +23,9 @@ import qualified Data.Vector.Storable.Mutable  as V
 import qualified Data.Vector.Storable.Internal as V
 
 import Foreign.Marshal.Array
+dump ptr sz = do
+  fs <- peekArray sz ptr
+  print fs
 
 data Expr d a where
   I :: Tensor d a -> Expr d a
@@ -206,8 +209,8 @@ type EvalM = ExceptT EvalE (StateT EvalS IO)
 data EvalE = Fail Statement
   deriving (Show)
 
-evaluate :: [Statement] -> IO (Either EvalE ())
-evaluate ss = evalStateT (runExceptT $ eval ss) M.empty
+execute :: [Statement] -> IO (Either EvalE ())
+execute ss = evalStateT (runExceptT $ eval ss) M.empty
   where
     eval [] = return ()
     eval (s:ss) = do
@@ -318,7 +321,3 @@ evaluate ss = evalStateT (runExceptT $ eval ss) M.empty
           , Just (wt' :: Tensor d3 a) <- cast wt
           -> o ut' vt' wt'
         _ -> e
-
-dump ptr sz = do
-  fs <- peekArray sz ptr
-  print fs
