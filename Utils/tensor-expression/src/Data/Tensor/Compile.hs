@@ -199,7 +199,7 @@ compile (a :%# b) = do
   if n /= v
     then throwError CGSizeMismatchedTensors
     else do
-      v3 <- newVar (D2 m n)
+      v3 <- newVar (D2 u m)
       return (s1 ++ s2 ++ [Alloc v3, BlasGEMM ColMajor Trans v1 NoTrans v2 1 0 v3], v3)
 
 data TensorWrap where

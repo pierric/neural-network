@@ -115,3 +115,33 @@ main = hspec $ do
           t3 <- packTensor d3 $ hv2v (v2hm d1 v1 #> v2hv d2 v2)
           t4 <- eval' $ I t1 :#> I t2
           eq t3 t4
+  describe "matrix * matrix" $ do
+    it "ident %# matrix1 = matrix1" $ do
+      let s = 8
+      forAll (mkV (D2 s s)) $ do
+        \v1 -> ioProperty $ do
+          t1 <- packTensor (D2 s s) $ hm2v (ident s)
+          t2 <- packTensor (D2 s s) v1
+          t3 <- eval' $ I t1 :%# I t2
+          eq t2 t3
+    it "matrix1 %# ident = matrix1^T" $ do
+      let s = 8
+          d = D2 s s
+      forAll (mkV d) $ do
+        \v1 -> ioProperty $ do
+          t1 <- packTensor d v1
+          t2 <- packTensor d $ hm2v (ident s)
+          t3 <- packTensor d $ hm2v (tr' $ v2hm d v1)
+          t4 <- eval' $ I t1 :%# I t2
+          eq t3 t4
+    it "matrix1 %# matrix2 = matrix3" $ do
+      let d1 = D2 8 5
+          d2 = D2 3 5
+          d3 = D2 3 8
+      forAll (liftM2 (,) (mkV d1) (mkV d2)) $ do
+        \(v1, v2) -> ioProperty $ do
+          t1 <- packTensor d1 v1
+          t2 <- packTensor d2 v2
+          t3 <- packTensor d3 $ hm2v (v2hm d2 v2 <> tr' (v2hm d1 v1))
+          t4 <- eval' $ I t1 :%# I t2
+          eq t3 t4

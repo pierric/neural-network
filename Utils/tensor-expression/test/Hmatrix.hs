@@ -1,11 +1,11 @@
 module Hmatrix (
   v2hv, hv2v, v2hm, hm2v, t2hv,
-  (<#), (#>), ident, dispf,
+  (<#), (#>), (<>), ident, tr', dispf,
 ) where
 
 import Data.Tensor
 import qualified Numeric.LinearAlgebra as HM
-import Numeric.LinearAlgebra ((<#), (#>), ident, dispf)
+import Numeric.LinearAlgebra ((<#), (#>), (<>), ident, tr', dispf)
 import qualified Data.Vector.Storable as PV
 import System.IO.Unsafe (unsafePerformIO)
 

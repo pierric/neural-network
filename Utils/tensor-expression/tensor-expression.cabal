@@ -32,7 +32,7 @@ library
                        Data.Tensor.Compile,
                        Data.Tensor.Optimize,
                        Data.Tensor.SIMD
-  build-depends:       base >= 4.7 && < 5, vector, mtl, containers, wl-pprint-extras, ghc-prim,
+  build-depends:       base >= 4.7 && < 5, vector, mtl, transformers, containers, wl-pprint-extras, ghc-prim,
                        blas-hs >= 0.1.1.0
   default-language:    Haskell2010
   default-extensions:  GADTs, BangPatterns, TypeOperators, KindSignatures,
