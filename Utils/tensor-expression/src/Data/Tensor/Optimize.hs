@@ -5,46 +5,51 @@ module Data.Tensor.Optimize (
 import Data.Tensor.Class
 import Data.Tensor.Prop
 import Data.Tensor.Compile
+import Data.Maybe (fromJust)
+import Control.Monad
 import Control.Monad.Except
 import Control.Monad.State
-import Control.Monad.Identity
+import Control.Monad.Trans.Maybe
 import Data.Typeable (cast)
 
 -- import Debug.Trace
 -- import Text.PrettyPrint.Free (pretty)
 
-data OptError = NotEligible | Continue [Statement] [Statement]
 type OptM = StateT CGState IO
-type Pipeline = [Statement] -> ExceptT OptError OptM [Statement]
+-- a pipeline take a sequence of statements, and
+-- produce a sequence if it applies
+-- or empty otherwise
+type Pipeline  = [Statement] -> MaybeT OptM [Statement]
+-- the PipelineStep is a single step in the pipeline that
+-- throws a OptError for further indication of action
+data OptError = NotEligible | Continue [Statement] [Statement]
+type PipelineStep = [Statement] -> ExceptT OptError OptM [Statement]
 
 optimize :: CGState -> [Statement] -> IO [Statement]
 optimize cg st = flip evalStateT cg $ do
-  foldM eval st [opt_repeat opt_rewrite_alloc_store_as_bind
-                ,opt_repeat opt_remove_synonym
-                ,opt_repeat opt_absorb_gemv_dotadd
-                ,opt_repeat opt_absorb_gemv_dotsca
-                ,opt_repeat opt_absorb_gemm_dotadd
-                ,opt_repeat opt_absorb_gemm_dotsca]
+  foldM eval st [repeat_pipeline $ pipeline opt_rewrite_alloc_store_as_bind
+                ,repeat_pipeline $ pipeline opt_remove_synonym
+                ,repeat_pipeline $ pipeline opt_absorb_gemv_dotadd
+                ,repeat_pipeline $ pipeline opt_absorb_gemv_dotsca
+                ,repeat_pipeline $ pipeline opt_absorb_gemm_dotadd
+                ,repeat_pipeline $ pipeline opt_absorb_gemm_dotsca]
   where
-    eval st act = run_pipeline act st >>= return . fst
+    eval st act = fromJust <$> runMaybeT (act st `mplus` return st)
 
-opt_repeat :: Pipeline -> Pipeline
-opt_repeat act st = go st
+repeat_pipeline :: Pipeline -> Pipeline
+repeat_pipeline act = lift . go
   where
-    go st = do
-      (st, flag) <- lift $ run_pipeline act st
-      if flag then go st else return st
+    go st = runMaybeT (act st) >>= maybe (return st) go
 
-run_pipeline :: Pipeline -> [Statement] -> OptM ([Statement], Bool)
-run_pipeline act st = do
-  r <- runExceptT (act st)
+pipeline :: PipelineStep -> Pipeline
+pipeline act st = do
+  r <- lift $ runExceptT (act st)
   case r of
-    Left NotEligible        -> return $ (st, False)
-    Left (Continue st1 st2) -> do (st2', flag) <- run_pipeline act st2
-                                  return (st1 ++ st2', flag)
-    Right st1               -> return $ (st1, True)
+    Left NotEligible        -> mzero
+    Left (Continue st1 st2) -> (st1 ++) <$> (pipeline act st2 `mplus` return st2)
+    Right st1               -> return st1
 
-opt_rewrite_alloc_store_as_bind :: Pipeline
+opt_rewrite_alloc_store_as_bind :: PipelineStep
 opt_rewrite_alloc_store_as_bind st = do
   let (st1, st2) = break isAlloc st
   when (null st2) $ throwError NotEligible
@@ -59,7 +64,7 @@ opt_rewrite_alloc_store_as_bind st = do
           case cast x of
             Just x' -> return $ st1 ++ [Bind v x'] ++ st4 ++ st6
 
-opt_remove_synonym :: Pipeline
+opt_remove_synonym :: PipelineStep
 opt_remove_synonym st = do
   let (st1, st2) = break isBind st
   when (null st2) $ throwError NotEligible
@@ -73,7 +78,7 @@ opt_remove_synonym st = do
             Nothing -> error "Binding a tensor with variables of different dimensions!"
             Just v' -> return $ st1 ++ [Bind v t] ++ st4 ++ substitute v' v st6
 
-opt_absorb_gemv_dotadd :: Pipeline
+opt_absorb_gemv_dotadd :: PipelineStep
 opt_absorb_gemv_dotadd st =
   lookfor st isGEMV (\(BlasGEMV _ _ _ _ _ _ v3) -> isDotScaTo $ _vid v3) $
     \st1 g@(BlasGEMV o t v1 v2 a b v3) st4 st5 -> do
@@ -112,7 +117,7 @@ opt_absorb_gemv_dotadd st =
   --           else
   --             throwError $ Continue (st1 ++ [head st2]) (tail st2)
 
-opt_absorb_gemv_dotsca :: Pipeline
+opt_absorb_gemv_dotsca :: PipelineStep
 opt_absorb_gemv_dotsca st =
   lookfor st isGEMV (\(BlasGEMV _ _ _ _ _ _ v3) -> isDotScaTo $ _vid v3) $
     \st1 g@(BlasGEMV o t v1 v2 a b v3) st4 st5 -> do
@@ -137,7 +142,7 @@ opt_absorb_gemv_dotsca st =
   --           Nothing -> error "This should not happen: types do not agree"
   --           Just c  -> return $ st1 ++ st4 ++ copy v4 v6 ++ [BlasGEMV o t v1 v2 (c*a) (c*b) (v3{_vid = _vid v6})] ++ st6
 
-opt_absorb_gemm_dotadd :: Pipeline
+opt_absorb_gemm_dotadd :: PipelineStep
 opt_absorb_gemm_dotadd st =
   lookfor st isGEMM (\(BlasGEMM _ _ _ _ _ _ _ v3) -> isDotAddTo $ _vid v3) $
     \st1 g@(BlasGEMM o t1 v1 t2 v2 a b v3) st4 st5 -> do
@@ -176,7 +181,7 @@ opt_absorb_gemm_dotadd st =
   --           else
   --             throwError $ Continue (st1 ++ [head st2]) (tail st2)
 
-opt_absorb_gemm_dotsca :: Pipeline
+opt_absorb_gemm_dotsca :: PipelineStep
 opt_absorb_gemm_dotsca st =
   lookfor st isGEMV (\(BlasGEMM _ _ _ _ _ _ _ v3) -> isDotScaTo $ _vid v3) $
     \st1 g@(BlasGEMM o t1 v1 t2 v2 a b v3) st4 st5 -> do
