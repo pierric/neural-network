@@ -20,6 +20,6 @@ main = do
   t1 <- packTensor d1 v1
   t2 <- packTensor d2 v2
   t3 <- packTensor d3 $ hv2v (v2hv d1 v1 <# v2hm d2 v2)
-  t4 <- execute' $ I t1 :<# I t2
+  t4 <- eval' $ I t1 :<# I t2
   putStrLn $ show $ t2hv t3
   putStrLn $ show $ t2hv t4

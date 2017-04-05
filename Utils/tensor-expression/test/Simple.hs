@@ -30,7 +30,7 @@ main = hspec $ do
         \v -> ioProperty $ do
           zr <- mkZ d
           t1 <- packTensor d v
-          t2 <- execute' $ I zr :.+ I t1
+          t2 <- eval' $ I zr :.+ I t1
           eq t1 t2
     it "vec1 + zero = vec1" $ do
       let d = D1 5
@@ -38,7 +38,7 @@ main = hspec $ do
         \v -> ioProperty $ do
           zr <- mkZ d
           t1 <- packTensor d v
-          t2 <- execute' $ I t1 :.+ I zr
+          t2 <- eval' $ I t1 :.+ I zr
           eq t1 t2
     it "vec1 + vec2 = vec3" $ do
       let d = D1 7
@@ -47,7 +47,7 @@ main = hspec $ do
           t1 <- packTensor d v1
           t2 <- packTensor d v2
           t3 <- packTensor d $ PV.zipWith (+) v1 v2
-          t4 <- execute' $ I t1 :.+ I t2
+          t4 <- eval' $ I t1 :.+ I t2
           eq t3 t4
   describe "vec * vec" $ do
     it "zero * vec1 = zero" $ do
@@ -56,7 +56,7 @@ main = hspec $ do
         \v -> ioProperty $ do
           zr <- mkZ d
           t1 <- packTensor d v
-          t2 <- execute' $ I zr :.* I t1
+          t2 <- eval' $ I zr :.* I t1
           eq zr t2
     it "vec1 * zero = zero" $ do
       let d = D1 3
@@ -64,7 +64,7 @@ main = hspec $ do
         \v -> ioProperty $ do
           zr <- mkZ d
           t1 <- I <$> packTensor d v
-          t2 <- execute' $ I zr :.* t1
+          t2 <- eval' $ I zr :.* t1
           eq zr t2
     it "vec1 * vec2 = vec3" $ do
       let d = D1 7
@@ -73,7 +73,7 @@ main = hspec $ do
           t1 <- packTensor d v1
           t2 <- packTensor d v2
           t3 <- packTensor d $ PV.zipWith (*) v1 v2
-          t4 <- execute' $ I t1 :.* I t2
+          t4 <- eval' $ I t1 :.* I t2
           eq t3 t4
   describe "vec * matrix" $ do
     it "vec1 * ident = vec1" $ do
@@ -82,7 +82,7 @@ main = hspec $ do
         \v1 -> ioProperty $ do
           t1 <- packTensor (D1 s) v1
           t2 <- packTensor (D2 s s) $ hm2v (ident s)
-          t3 <- execute' $ I t1 :<# I t2
+          t3 <- eval' $ I t1 :<# I t2
           eq t3 t1
     it "vec1 * matrix = vec2" $ do
       let d1 = D1 2
@@ -93,7 +93,7 @@ main = hspec $ do
           t1 <- packTensor d1 v1
           t2 <- packTensor d2 v2
           t3 <- packTensor d3 $ hv2v (v2hv d1 v1 <# v2hm d2 v2)
-          t4 <- execute' $ I t1 :<# I t2
+          t4 <- eval' $ I t1 :<# I t2
           eq t3 t4
   describe "matrix * vec" $ do
     it "ident * vec1 = vec1" $ do
@@ -102,7 +102,7 @@ main = hspec $ do
         \v1 -> ioProperty $ do
           t1 <- packTensor (D2 s s) $ hm2v (ident s)
           t2 <- packTensor (D1 s) v1
-          t3 <- execute' $ I t1 :#> I t2
+          t3 <- eval' $ I t1 :#> I t2
           eq t2 t3
     it "matrix * vec1 = vec2" $ do
       let d1 = D2 6 2
@@ -113,5 +113,5 @@ main = hspec $ do
           t1 <- packTensor d1 v1
           t2 <- packTensor d2 v2
           t3 <- packTensor d3 $ hv2v (v2hm d1 v1 #> v2hv d2 v2)
-          t4 <- execute' $ I t1 :#> I t2
+          t4 <- eval' $ I t1 :#> I t2
           eq t3 t4
