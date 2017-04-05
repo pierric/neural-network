@@ -2,7 +2,7 @@
 module Main where
 
 import Test.Hspec
-import Test.QuickCheck
+import Test.QuickCheck hiding (scale)
 import qualified Data.Vector.Storable as PV
 import Control.Monad
 import Data.Tensor
@@ -145,3 +145,24 @@ main = hspec $ do
           t3 <- packTensor d3 $ hm2v (v2hm d2 v2 <> tr' (v2hm d1 v1))
           t4 <- eval' $ I t1 :%# I t2
           eq t3 t4
+  describe "scaling" $ do
+    it "scale vector" $ do
+      let d = D1 9
+      forAll (mkV d) $ \v1 ->
+        forAll (choose (0,100 :: Int)) $ \s ->
+          ioProperty $ do
+            let f = fromIntegral s / 100
+            t1 <- packTensor d v1
+            t2 <- eval' $ S f (I t1)
+            t3 <- packTensor d $ hv2v (scale f $ v2hv d v1)
+            eq t2 t3
+    it "scale matrix" $ do
+      let d = D2 8 8
+      forAll (mkV d) $ \v1 ->
+        forAll (choose (0,100 :: Int)) $ \s ->
+          ioProperty $ do
+            let f = fromIntegral s / 100
+            t1 <- packTensor d v1
+            t2 <- eval' $ S f (I t1)
+            t3 <- packTensor d $ hm2v (scale f $ v2hm d v1)
+            eq t2 t3

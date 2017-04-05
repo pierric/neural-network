@@ -1,6 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Data.Tensor.Compile(
-  Expr(..), dim,
   Var(..), Statement(..),
   isAlloc, isBind, isBindToTensor, isStore, isStoreTo,
   isGEMV, isGERU, isGEMM,
@@ -26,26 +25,6 @@ import Foreign.Marshal.Array
 dump ptr sz = do
   fs <- peekArray sz ptr
   print fs
-
-data Expr d a where
-  I :: Tensor d a -> Expr d a
-  -- S :: a -> Expr d a -> Expr d a
-  -- A :: (a -> a) -> Expr d a -> Expr d a
-  (:.*) :: Expr d a -> Expr d a -> Expr d a
-  (:.+) :: Expr d a -> Expr d a -> Expr d a
-  (:<#) :: Expr D1 a -> Expr D2 a -> Expr D1 a
-  (:#>) :: Expr D2 a -> Expr D1 a -> Expr D1 a
-  (:%#) :: Expr D2 a -> Expr D2 a -> Expr D2 a
-  (:<>) :: Expr D1 a -> Expr D1 a -> Expr D2 a
-
-dim :: Expr d a -> d
-dim (I t)     = _tdim t
-dim (a :.* b) = dim a
-dim (a :.+ b) = dim b
-dim (a :<# b) = let D2 _ c = dim b in D1 c
-dim (a :#> b) = let D2 r _ = dim a in D1 r
-dim (a :%# b) = let (D2 r1 _, D2 r2 _) = (dim a, dim b) in D2 r2 r1
-dim (a :<> b) = let (D1 r, D1 c) = (dim a, dim b) in D2 r c
 
 data Var d a = Var {
   _vdim :: d,
@@ -148,6 +127,10 @@ compile :: (Dimension d, Element a) => Expr d a -> CG ([Statement], Var d a)
 compile (I t) = do
   v <- newVar (_tdim t)
   return ([Bind v t], v)
+compile (S f a) = do
+  (s1, v1) <- compile a
+  v2 <- newVar (_vdim v1)
+  return (s1 ++ [Alloc v2, DotSca f v1 v2], v2)
 compile (a :.+ b) = do
   (s1, v1) <- compile a
   (s2, v2) <- compile b

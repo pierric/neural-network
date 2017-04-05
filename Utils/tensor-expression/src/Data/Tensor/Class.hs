@@ -49,3 +49,24 @@ packTensor d v = if PV.length v < size d then error "cannot pack tensor" else do
 eqTensor :: (Dimension d1, Dimension d2) => Tensor d1 a1 -> Tensor d2 a2 -> Bool
 eqTensor (Tensor d1 (V.MVector o1 p1)) (Tensor d2 (V.MVector o2 p2)) =
   size d1 == size d2 && o1 == o2 && p1 == castForeignPtr p2
+
+data Expr d a where
+  I :: Tensor d a -> Expr d a
+  S :: a -> Expr d a -> Expr d a
+  -- A :: (a -> a) -> Expr d a -> Expr d a
+  (:.*) :: Expr d a -> Expr d a -> Expr d a
+  (:.+) :: Expr d a -> Expr d a -> Expr d a
+  (:<#) :: Expr D1 a -> Expr D2 a -> Expr D1 a
+  (:#>) :: Expr D2 a -> Expr D1 a -> Expr D1 a
+  (:%#) :: Expr D2 a -> Expr D2 a -> Expr D2 a
+  (:<>) :: Expr D1 a -> Expr D1 a -> Expr D2 a
+
+dim :: Expr d a -> d
+dim (I t)     = _tdim t
+dim (S _ a)   = dim a
+dim (a :.* b) = dim a
+dim (a :.+ b) = dim b
+dim (a :<# b) = let D2 _ c = dim b in D1 c
+dim (a :#> b) = let D2 r _ = dim a in D1 r
+dim (a :%# b) = let (D2 r1 _, D2 r2 _) = (dim a, dim b) in D2 r2 r1
+dim (a :<> b) = let (D1 r, D1 c) = (dim a, dim b) in D2 r c
