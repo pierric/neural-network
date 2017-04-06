@@ -1,4 +1,4 @@
-{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE BangPatterns, FlexibleInstances #-}
 module Data.Tensor.Optimize (
   optimize
 ) where
@@ -17,38 +17,38 @@ import Data.Typeable (cast)
 -- import Text.PrettyPrint.Free (pretty)
 
 type OptM = StateT CGState IO
--- a pipeline take a sequence of statements, and
--- produce a sequence if it applies
--- or empty otherwise
-type Pipeline  = [Statement] -> MaybeT OptM [Statement]
+newtype Pipeline = Pipeline { runPipeline :: [Statement] -> OptM [Statement] }
 -- the PipelineStep is a single step in the pipeline that
 -- throws a OptError for further indication of action
 data OptError = NotEligible | Continue ![Statement] ![Statement]
 type PipelineStep = [Statement] -> ExceptT OptError OptM [Statement]
 
-optimize :: CGState -> [Statement] -> IO [Statement]
-optimize cg st = flip evalStateT cg $ do
-  foldM eval st [repeat_pipeline $ pipeline opt_rewrite_alloc_store_as_bind
-                ,repeat_pipeline $ pipeline opt_remove_synonym
-                ,repeat_pipeline $ pipeline opt_absorb_gemv_dotadd
-                ,repeat_pipeline $ pipeline opt_absorb_gemv_dotsca
-                ,repeat_pipeline $ pipeline opt_absorb_gemm_dotadd
-                ,repeat_pipeline $ pipeline opt_absorb_gemm_dotsca]
-  where
-    eval st act = fromJust <$> runMaybeT (act st `mplus` return st)
+instance Monoid Pipeline where
+  mempty = Pipeline return
+  mappend (Pipeline a) (Pipeline b) = Pipeline (\x -> a x >>= b)
 
-repeat_pipeline :: Pipeline -> Pipeline
-repeat_pipeline act = lift . go
-  where
-    go st = runMaybeT (act st) >>= maybe (return st) go
+optimize :: CGState -> [Statement] -> IO [Statement]
+optimize cg st = flip evalStateT cg $ flip runPipeline st $
+  mconcat [ pipeline opt_rewrite_alloc_store_as_bind
+          , pipeline opt_remove_synonym
+          , pipeline opt_absorb_gemv_dotadd
+          , pipeline opt_absorb_gemv_dotsca
+          , pipeline opt_absorb_gemm_dotadd
+          , pipeline opt_absorb_gemm_dotsca]
 
 pipeline :: PipelineStep -> Pipeline
-pipeline act st = do
-  r <- lift $ runExceptT (act st)
-  case r of
-    Left NotEligible        -> mzero
-    Left (Continue st1 st2) -> (st1 ++) <$> pipeline act st2
-    Right st1               -> return st1
+pipeline act = Pipeline go
+  where
+    go st = runMaybeT (mgo act st) >>= maybe (return st) go
+    -- taking a sequence of statements, and
+    -- produce a sequence if it applies
+    -- or empty otherwise
+    mgo act st = do
+      r <- lift $ runExceptT (act st)
+      case r of
+        Left NotEligible        -> mzero
+        Left (Continue st1 st2) -> (st1 ++) <$> mgo act st2
+        Right st1               -> return st1
 
 opt_rewrite_alloc_store_as_bind :: PipelineStep
 opt_rewrite_alloc_store_as_bind st = do
