@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances, FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances, FlexibleContexts, ScopedTypeVariables #-}
 module Main where
 
 import Test.Hspec
@@ -7,6 +7,7 @@ import qualified Data.Vector.Storable as PV
 import Control.Monad
 import Data.Tensor
 import Hmatrix
+import Gen
 
 mkZ :: Dimension d => d -> IO (Tensor d Float)
 mkZ = newTensor
@@ -15,12 +16,23 @@ mkV :: Dimension d => d -> Gen (PV.Vector Float)
 mkV d = let sf = fromIntegral <$> (arbitrary :: Gen Int)
         in PV.fromList <$> vectorOf (size d) sf
 
-eq :: (Dimension d, Element a, Ord a) => Tensor d a -> Tensor d a -> IO Bool
+isclose a b
+  | a == b       = True
+  | isInfinite a = False
+  | isInfinite b = False
+  | otherwise    = let diff = abs (a-b)
+                       rel  = 0.0001
+                   in diff <= abs (rel * a) || diff <= abs (rel * b)
+
+
+eq :: (Dimension d, Element a, RealFloat a) => Tensor d a -> Tensor d a -> IO Property
 eq t1 t2 = do
   d1 <- PV.unsafeFreeze (_tdat t1)
   d2 <- PV.unsafeFreeze (_tdat t2)
-  let df = PV.map abs (PV.zipWith (-) d1 d2)
-  return $ _tdim t1 == _tdim t2 && PV.all (<0.01) df
+  let cc = PV.zipWith isclose d1 d2
+      pr = do putStrLn $ show d1
+              putStrLn $ show d2
+  return $ whenFail pr $ _tdim t1 == _tdim t2 && PV.and cc
 
 main = hspec $ do
   describe "vec + vec" $ do
@@ -145,6 +157,18 @@ main = hspec $ do
           t3 <- packTensor d3 $ hm2v (v2hm d2 v2 <> tr' (v2hm d1 v1))
           t4 <- eval' $ I t1 :%# I t2
           eq t3 t4
+  describe "cross product" $ do
+    it "vec1 <> vec2" $ do
+      let d1 = D1 3
+          d2 = D1 5
+          d3 = D2 3 5
+      forAll (liftM2 (,) (mkV d1) (mkV d2)) $ do
+        \(v1, v2) -> ioProperty $ do
+          t1 <- packTensor d1 v1
+          t2 <- packTensor d2 v2
+          t3 <- eval' $ I t1 :<> I t2
+          t4 <- packTensor d3 $ hm2v (v2hv d1 v1 `outer` (v2hv d2 v2))
+          eq t3 t4
   describe "scaling" $ do
     it "scale vector" $ do
       let d = D1 9
@@ -166,3 +190,8 @@ main = hspec $ do
             t2 <- eval' $ S f (I t1)
             t3 <- packTensor d $ hm2v (scale f $ v2hm d v1)
             eq t2 t3
+  describe "optimization" $ do
+    it "opt'ed 1D Expr computes right" $ property $ \ (e :: Expr D1 Float) -> ioProperty $ do
+      t1 <- eval' e
+      t2 <- eval  e
+      eq t1 t2

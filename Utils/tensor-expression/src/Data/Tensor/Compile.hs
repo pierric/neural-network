@@ -10,7 +10,7 @@ module Data.Tensor.Compile(
 
 import Data.Tensor.Class
 import Data.Data
-import Control.Monad.State
+import Control.Monad.State.Strict
 import Control.Monad.Except
 import Text.Printf
 import Text.PrettyPrint.Free (Pretty(..), Doc, fill, text, hsep, vcat, (<+>))
@@ -89,8 +89,6 @@ substitute v1 v2 st = if v1 == v2 then st else map subst st
       | Just v1 == cast vb = DotAdd va (vb{_vid = _vid v2}) vc
       | Just v1 == cast vc = DotAdd va vb (vc{_vid = _vid v2})
 
-instance (Dimension d, Element a) => Show (Tensor d a) where
-  show (Tensor d (V.MVector o v)) = printf "<tensor (%-8s): %s + %4d>" (show d) (show v) o
 instance (Dimension d, Element a) => Show (Var d a) where
   show (Var d i) = printf "v%03d" i
 
@@ -246,7 +244,7 @@ execute ss = evalStateT (runExceptT $ eval ss) M.empty
               let D1 r = _vdim v
                   D1 c = _vdim w
                   (m,n,lda) = case o of
-                                RowMajor -> (r, c, r)
+                                RowMajor -> (r, c, c)
                                 ColMajor -> (c, r, c)
               in geru o m n a px 1 py 1 pz lda))))
         BlasGEMM o t1 v1 t2 v2 a b w ->

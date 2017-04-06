@@ -28,8 +28,13 @@ varUsage :: Statement -> [VarUsage]
 varUsage (Alloc v)   = [Make MakeAlloc $ _vid v]
 varUsage (Bind  v _) = [Make MakeBind  $ _vid v]
 varUsage (Store v _) = [Write $ _vid v]
-varUsage (BlasGEMV _ _ v1 v2 _ _ v3) = [Read $ _vid v1,Read $ _vid v2,Write $ _vid v3]
-varUsage (DotAdd v1 v2 v3)           = [Read $ _vid v1,Read $ _vid v2,Write $ _vid v3]
+varUsage (Copy  v w) = [Read (_vid v), Write (_vid w)]
+varUsage (BlasGEMV _ _ v1 v2 _ _ v3)   = [Read $ _vid v1,Read $ _vid v2,Write $ _vid v3]
+varUsage (BlasGERU _ v1 v2 _ v3)       = [Read $ _vid v1,Read $ _vid v2,Write $ _vid v3]
+varUsage (BlasGEMM _ _ v1 _ v2 _ _ v3) = [Read $ _vid v1,Read $ _vid v2,Write $ _vid v3]
+varUsage (DotAdd v1 v2 v3)             = [Read $ _vid v1,Read $ _vid v2,Write $ _vid v3]
+varUsage (DotMul v1 v2 v3)             = [Read $ _vid v1,Read $ _vid v2,Write $ _vid v3]
+varUsage (DotSca _ v1 v2)              = [Read $ _vid v1,Write $ _vid v2]
 
 data Error = MakeTwice     VarUsage
            | UseBeforeMake VarUsage

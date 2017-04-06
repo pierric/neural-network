@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 module Data.Tensor.Optimize (
   optimize
 ) where
@@ -8,7 +9,7 @@ import Data.Tensor.Compile
 import Data.Maybe (fromJust)
 import Control.Monad
 import Control.Monad.Except
-import Control.Monad.State
+import Control.Monad.State.Strict
 import Control.Monad.Trans.Maybe
 import Data.Typeable (cast)
 
@@ -22,7 +23,7 @@ type OptM = StateT CGState IO
 type Pipeline  = [Statement] -> MaybeT OptM [Statement]
 -- the PipelineStep is a single step in the pipeline that
 -- throws a OptError for further indication of action
-data OptError = NotEligible | Continue [Statement] [Statement]
+data OptError = NotEligible | Continue ![Statement] ![Statement]
 type PipelineStep = [Statement] -> ExceptT OptError OptM [Statement]
 
 optimize :: CGState -> [Statement] -> IO [Statement]
@@ -46,11 +47,12 @@ pipeline act st = do
   r <- lift $ runExceptT (act st)
   case r of
     Left NotEligible        -> mzero
-    Left (Continue st1 st2) -> (st1 ++) <$> (pipeline act st2 `mplus` return st2)
+    Left (Continue st1 st2) -> (st1 ++) <$> pipeline act st2
     Right st1               -> return st1
 
 opt_rewrite_alloc_store_as_bind :: PipelineStep
 opt_rewrite_alloc_store_as_bind st = do
+  -- liftIO $ putStrLn "opt_rewrite_alloc_store_as_bind"
   let (st1, st2) = break isAlloc st
   when (null st2) $ throwError NotEligible
   case st2 of
@@ -66,6 +68,7 @@ opt_rewrite_alloc_store_as_bind st = do
 
 opt_remove_synonym :: PipelineStep
 opt_remove_synonym st = do
+  -- liftIO $ putStrLn "opt_remove_synonym"
   let (st1, st2) = break isBind st
   when (null st2) $ throwError NotEligible
   case st2 of
@@ -79,8 +82,9 @@ opt_remove_synonym st = do
             Just v' -> return $ st1 ++ [Bind v t] ++ st4 ++ substitute v' v st6
 
 opt_absorb_gemv_dotadd :: PipelineStep
-opt_absorb_gemv_dotadd st =
-  lookfor st isGEMV (\(BlasGEMV _ _ _ _ _ _ v3) -> isDotScaTo $ _vid v3) $
+opt_absorb_gemv_dotadd st = do
+  -- liftIO $ putStrLn "opt_absorb_gemv_dotadd"
+  lookfor st isGEMV (\(BlasGEMV _ _ _ _ _ _ v3) -> isDotAddTo $ _vid v3) $
     \st1 g@(BlasGEMV o t v1 v2 a b v3) st4 st5 -> do
       when (not (prop_only_make_var st4) || null st5) $
        throwError $ Continue (st1 ++ [g]) (st4++st5)
@@ -118,7 +122,8 @@ opt_absorb_gemv_dotadd st =
   --             throwError $ Continue (st1 ++ [head st2]) (tail st2)
 
 opt_absorb_gemv_dotsca :: PipelineStep
-opt_absorb_gemv_dotsca st =
+opt_absorb_gemv_dotsca st = do
+  -- liftIO $ putStrLn "opt_absorb_gemv_dotsca"
   lookfor st isGEMV (\(BlasGEMV _ _ _ _ _ _ v3) -> isDotScaTo $ _vid v3) $
     \st1 g@(BlasGEMV o t v1 v2 a b v3) st4 st5 -> do
       when (not (prop_only_make_var st4) || null st5) $
@@ -143,7 +148,8 @@ opt_absorb_gemv_dotsca st =
   --           Just c  -> return $ st1 ++ st4 ++ copy v4 v6 ++ [BlasGEMV o t v1 v2 (c*a) (c*b) (v3{_vid = _vid v6})] ++ st6
 
 opt_absorb_gemm_dotadd :: PipelineStep
-opt_absorb_gemm_dotadd st =
+opt_absorb_gemm_dotadd st = do
+  -- liftIO $ putStrLn "opt_absorb_gemm_dotadd"
   lookfor st isGEMM (\(BlasGEMM _ _ _ _ _ _ _ v3) -> isDotAddTo $ _vid v3) $
     \st1 g@(BlasGEMM o t1 v1 t2 v2 a b v3) st4 st5 -> do
       when (not (prop_only_make_var st4) || null st5) $
@@ -182,8 +188,9 @@ opt_absorb_gemm_dotadd st =
   --             throwError $ Continue (st1 ++ [head st2]) (tail st2)
 
 opt_absorb_gemm_dotsca :: PipelineStep
-opt_absorb_gemm_dotsca st =
-  lookfor st isGEMV (\(BlasGEMM _ _ _ _ _ _ _ v3) -> isDotScaTo $ _vid v3) $
+opt_absorb_gemm_dotsca st = do
+  -- liftIO $ putStrLn "opt_absorb_gemm_dotsca"
+  lookfor st isGEMM (\(BlasGEMM _ _ _ _ _ _ _ v3) -> isDotScaTo $ _vid v3) $
     \st1 g@(BlasGEMM o t1 v1 t2 v2 a b v3) st4 st5 -> do
       when (not (prop_only_make_var st4) || null st5) $
        throwError $ Continue (st1 ++ [g]) (st4++st5)
@@ -219,26 +226,26 @@ lookfor st beg end act = do
 
 copy v1 v2 = if v1 == v2 then [] else [Copy v1 v2]
 
-test1 :: IO [Statement]
-test1 = do
-  t1 <- newTensor (D1 4) :: IO (Tensor D1 Float)
-  t2 <- newTensor (D2 4 4)
-  t3 <- newTensor (D1 4)
-  let cc = compile $ (I t1 :<# I t2) :.+ I t3
-  er <- runExceptT $ evalStateT cc 0
-  case er of
-    Left  e -> error $ show e
-    Right (st, vr) -> do
-      t4 <- newTensor (D1 4)
-      return $ st ++ [Store vr t4]
-
-test2 :: IO [Statement]
-test2 = do
-  t1 <- newTensor (D1 4) :: IO (Tensor D1 Float)
-  t2 <- newTensor (D1 4)
-  let cc = compile $ (I t1 :.+ I t2)
-  er <- runExceptT $ evalStateT cc 0
-  case er of
-    Left  e -> error $ show e
-    Right (st, vr) -> do
-      return $ st ++ [Store vr t1]
+-- test1 :: IO [Statement]
+-- test1 = do
+--   t1 <- newTensor (D1 4) :: IO (Tensor D1 Float)
+--   t2 <- newTensor (D2 4 4)
+--   t3 <- newTensor (D1 4)
+--   let cc = compile $ (I t1 :<# I t2) :.+ I t3
+--   er <- runExceptT $ evalStateT cc 0
+--   case er of
+--     Left  e -> error $ show e
+--     Right (st, vr) -> do
+--       t4 <- newTensor (D1 4)
+--       return $ st ++ [Store vr t4]
+--
+-- test2 :: IO [Statement]
+-- test2 = do
+--   t1 <- newTensor (D1 4) :: IO (Tensor D1 Float)
+--   t2 <- newTensor (D1 4)
+--   let cc = compile $ (I t1 :.+ I t2)
+--   er <- runExceptT $ evalStateT cc 0
+--   case er of
+--     Left  e -> error $ show e
+--     Right (st, vr) -> do
+--       return $ st ++ [Store vr t1]

@@ -3,6 +3,7 @@ module Data.Tensor.Class where
 import qualified Data.Vector.Storable as PV
 import qualified Data.Vector.Storable.Mutable  as V
 import qualified Data.Vector.Storable.Internal as V
+import Text.Printf
 import Foreign.ForeignPtr (castForeignPtr)
 import Data.Typeable (cast)
 import Data.Data
@@ -70,3 +71,8 @@ dim (a :<# b) = let D2 _ c = dim b in D1 c
 dim (a :#> b) = let D2 r _ = dim a in D1 r
 dim (a :%# b) = let (D2 r1 _, D2 r2 _) = (dim a, dim b) in D2 r2 r1
 dim (a :<> b) = let (D1 r, D1 c) = (dim a, dim b) in D2 r c
+
+instance (Show d, Show a) => Show (Tensor d a) where
+  show (Tensor d (V.MVector o v)) = printf "<tensor (%-8s): %s + %4d>" (show d) (show v) o
+
+deriving instance (Show d, Show a) => Show (Expr d a)
