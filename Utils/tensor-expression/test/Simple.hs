@@ -9,6 +9,12 @@ import Data.Tensor
 import Hmatrix
 import Gen
 
+--
+--  The Generation of Expr is slow, so better to restrict the max size in test data generation.
+--
+-- stack build tensor-expression --test --test-arguments --qc-max-size=25
+--
+
 mkZ :: Dimension d => d -> IO (Tensor d Float)
 mkZ = newTensor
 
