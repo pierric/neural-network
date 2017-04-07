@@ -2,8 +2,8 @@ module Data.Tensor(
   Dimension(..), Element(..), Tensor(..),
   D1(..), D2(..), D3(..),
   newTensor, packTensor, copyTensor, eqTensor,
-  Expr(..), Statement,
-  compile, optimize, CGState, execute,
+  Expr(..), dim, Statement(..),
+  compile, optimize, CGState, runCG, execute,
   eval, eval',
 ) where
 

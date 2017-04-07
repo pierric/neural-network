@@ -25,7 +25,7 @@ type PipelineStep = [Statement] -> ExceptT OptError OptM [Statement]
 
 instance Monoid Pipeline where
   mempty = Pipeline return
-  mappend (Pipeline a) (Pipeline b) = Pipeline (\x -> a x >>= b)
+  mappend (Pipeline a) (Pipeline b) = Pipeline (a >=> b)
 
 optimize :: CGState -> [Statement] -> IO [Statement]
 optimize cg st = flip evalStateT cg $ flip runPipeline st $
@@ -34,20 +34,23 @@ optimize cg st = flip evalStateT cg $ flip runPipeline st $
           , pipeline opt_absorb_gemv_dotadd
           , pipeline opt_absorb_gemv_dotsca
           , pipeline opt_absorb_gemm_dotadd
-          , pipeline opt_absorb_gemm_dotsca]
+          , pipeline opt_absorb_gemm_dotsca ]
 
 pipeline :: PipelineStep -> Pipeline
-pipeline act = Pipeline go
+pipeline act = Pipeline (liftM fromJust . runMaybeT . multi)
   where
-    go st = runMaybeT (mgo act st) >>= maybe (return st) go
-    -- taking a sequence of statements, and
-    -- produce a sequence if it applies
-    -- or empty otherwise
-    mgo act st = do
+    -- repeat untils the opt does not applies,
+    -- return the last optimization result.
+    multi st = (complete st >>= multi) `mplus` (return st)
+    -- taking a sequence of statements, and complete a full
+    -- cycle of the given step.
+    -- produce a sequence if it applies once or else Nothing.
+    complete :: [Statement] -> MaybeT OptM [Statement]
+    complete st = do
       r <- lift $ runExceptT (act st)
       case r of
         Left NotEligible        -> mzero
-        Left (Continue st1 st2) -> (st1 ++) <$> mgo act st2
+        Left (Continue st1 st2) -> (st1 ++) <$> complete st2
         Right st1               -> return st1
 
 opt_rewrite_alloc_store_as_bind :: PipelineStep

@@ -201,3 +201,7 @@ main = hspec $ do
       t1 <- eval' e
       t2 <- eval  e
       eq t1 t2
+    it "opt'ed 2D Expr computes right" $ property $ \ (e :: Expr D2 Float) -> ioProperty $ do
+      t1 <- eval' e
+      t2 <- eval  e
+      eq t1 t2
