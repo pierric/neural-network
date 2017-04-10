@@ -7,7 +7,12 @@ import Text.Printf
 import Foreign.ForeignPtr (castForeignPtr)
 import Data.Typeable (cast)
 import Data.Data
+import Data.Hashable
 import Blas.Generic.Safe (Numeric)
+import Control.Monad.State.Strict
+import Control.Monad.Except
+import System.IO.Unsafe (unsafeDupablePerformIO)
+import Foreign.Ptr (Ptr)
 import Data.Tensor.SIMD (SIMDable)
 
 data D1 = D1 {-# UNPACK #-}!Int
@@ -27,7 +32,7 @@ instance Dimension D2 where
 instance Dimension D3 where
   size (D3 a b c) = a * b * c
 
-class (Show a, Num a, Eq a, Typeable a, V.Storable a, SIMDable a, Numeric a) => Element a
+class (Show a, Num a, Eq a, Typeable a, V.Storable a, Hashable a, SIMDable a, Numeric a) => Element a
 
 instance Element Float
 
@@ -76,3 +81,60 @@ instance (Show d, Show a) => Show (Tensor d a) where
   show (Tensor d (V.MVector o v)) = printf "<tensor (%-8s): %s + %4d>" (show d) (show v) o
 
 deriving instance (Show d, Show a) => Show (Expr d a)
+
+data Var d a = Var {
+  _vdim :: d,
+  _vid  :: Int
+} deriving (Typeable, Data, Eq)
+
+type CG = StateT CGState (ExceptT CGError IO)
+data CGError = CGSizeMismatchedTensors
+  deriving (Eq, Show)
+type CGState = Int
+
+runCG :: CGState -> CG a -> IO (Either CGError (a, CGState))
+runCG cg act = runExceptT (runStateT act cg )
+
+newVar :: MonadState CGState m => d -> m (Var d a)
+newVar d = do
+  i <- get
+  modify (+1)
+  return $ Var d i
+
+instance Hashable D1 where
+  hashWithSalt s (D1 a) = s `hashWithSalt` a
+
+instance Hashable D2 where
+  hashWithSalt s (D2 a b) = s `hashWithSalt` a `hashWithSalt` b
+
+instance (Hashable d, Hashable a, V.Storable a) => Hashable (Tensor d a) where
+  hashWithSalt s (Tensor d v) = s `hashWithSalt` d `hashWithSalt` (unsafeDupablePerformIO $ V.unsafeWith v return)
+
+instance (Hashable a, V.Storable a) => Hashable (Expr D1 a) where
+  hashWithSalt s (I t)     = s `hashWithSalt` d1Expr `hashWithSalt` iExpr  `hashWithSalt` t
+  hashWithSalt s (S f e)   = s `hashWithSalt` d1Expr `hashWithSalt` sExpr  `hashWithSalt` f `hashWithSalt` e
+  hashWithSalt s (a :.* b) = s `hashWithSalt` d1Expr `hashWithSalt` dmExpr `hashWithSalt` a `hashWithSalt` b
+  hashWithSalt s (a :.+ b) = s `hashWithSalt` d1Expr `hashWithSalt` daExpr `hashWithSalt` a `hashWithSalt` b
+  hashWithSalt s (a :<# b) = s `hashWithSalt` d1Expr `hashWithSalt` vmExpr `hashWithSalt` a `hashWithSalt` b
+  hashWithSalt s (a :#> b) = s `hashWithSalt` d1Expr `hashWithSalt` mvExpr `hashWithSalt` a `hashWithSalt` b
+
+instance (Hashable a, V.Storable a) => Hashable (Expr D2 a) where
+  hashWithSalt s (I t)     = s `hashWithSalt` d2Expr `hashWithSalt` iExpr   `hashWithSalt` t
+  hashWithSalt s (S f e)   = s `hashWithSalt` d2Expr `hashWithSalt` sExpr   `hashWithSalt` f `hashWithSalt` e
+  hashWithSalt s (a :.* b) = s `hashWithSalt` d2Expr `hashWithSalt` dmExpr  `hashWithSalt` a `hashWithSalt` b
+  hashWithSalt s (a :.+ b) = s `hashWithSalt` d2Expr `hashWithSalt` daExpr  `hashWithSalt` a `hashWithSalt` b
+  hashWithSalt s (a :%# b) = s `hashWithSalt` d2Expr `hashWithSalt` mtmExpr `hashWithSalt` a `hashWithSalt` b
+  hashWithSalt s (a :<> b) = s `hashWithSalt` d2Expr `hashWithSalt` ovvExpr `hashWithSalt` a `hashWithSalt` b
+
+d1Expr, d2Expr :: Int
+d1Expr = 1
+d2Expr = 2
+iExpr, sExpr, dmExpr, daExpr, vmExpr, mvExpr, mtmExpr, ovvExpr :: Int
+iExpr  = 0x100
+sExpr  = 0x101
+dmExpr = 0x102
+daExpr = 0x103
+vmExpr = 0x104
+mvExpr = 0x105
+mtmExpr= 0x106
+ovvExpr= 0x107

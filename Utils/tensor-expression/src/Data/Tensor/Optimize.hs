@@ -5,7 +5,7 @@ module Data.Tensor.Optimize (
 
 import Data.Tensor.Class
 import Data.Tensor.Prop
-import Data.Tensor.Compile
+import Data.Tensor.Execute
 import Data.Maybe (fromJust)
 import Control.Monad
 import Control.Monad.Except

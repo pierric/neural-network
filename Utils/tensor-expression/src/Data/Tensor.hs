@@ -8,8 +8,9 @@ module Data.Tensor(
 ) where
 
 import Data.Tensor.Class
-import Data.Tensor.Compile
+import qualified Data.Tensor.Compile as Compile
 import Data.Tensor.Optimize
+import Data.Tensor.Execute
 import Data.Either
 import Control.Monad.State (runStateT)
 

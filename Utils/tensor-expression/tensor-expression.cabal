@@ -28,15 +28,16 @@ library
     hs-source-dirs:    src, vecnone
   exposed-modules:     Data.Tensor,
                        Data.Tensor.Class,
-                       Data.Tensor.Prop,
                        Data.Tensor.Compile,
                        Data.Tensor.Optimize,
+                       Data.Tensor.Execute,
+                       Data.Tensor.Prop,
                        Data.Tensor.SIMD
   build-depends:       base >= 4.7 && < 5, vector, mtl, transformers, containers, wl-pprint-extras, ghc-prim,
-                       blas-hs >= 0.1.1.0
+                       blas-hs >= 0.1.1.0, hashable >= 1.2.5
   default-language:    Haskell2010
   default-extensions:  GADTs, BangPatterns, TypeOperators, KindSignatures,
-                       StandaloneDeriving, DeriveDataTypeable, FlexibleContexts
+                       StandaloneDeriving, DeriveDataTypeable, FlexibleContexts, FlexibleInstances
 
 test-suite simple
   type:               exitcode-stdio-1.0

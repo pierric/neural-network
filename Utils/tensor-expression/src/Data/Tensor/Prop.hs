@@ -1,7 +1,7 @@
 module Data.Tensor.Prop where
 
 import Data.Tensor.Class
-import Data.Tensor.Compile
+import Data.Tensor.Execute
 import qualified Data.Set as S
 import Control.Monad.Except
 import Control.Monad.State
