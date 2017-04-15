@@ -22,7 +22,7 @@ data D2 = D2 {-# UNPACK #-}!Int {-# UNPACK #-}!Int
 data D3 = D3 {-# UNPACK #-}!Int {-# UNPACK #-}!Int {-# UNPACK #-}!Int
   deriving (Typeable, Data, Eq, Show)
 
-class (Show a, Eq a, Typeable a) => Dimension a where
+class (Show a, Eq a, Typeable a, Hashable a) => Dimension a where
   size :: a -> Int
 
 instance Dimension D1 where
@@ -82,24 +82,7 @@ instance (Show d, Show a) => Show (Tensor d a) where
 
 deriving instance (Show d, Show a) => Show (Expr d a)
 
-data Var d a = Var {
-  _vdim :: d,
-  _vid  :: Int
-} deriving (Typeable, Data, Eq)
-
-type CG = StateT CGState (ExceptT CGError IO)
-data CGError = CGSizeMismatchedTensors
-  deriving (Eq, Show)
-type CGState = Int
-
-runCG :: CGState -> CG a -> IO (Either CGError (a, CGState))
-runCG cg act = runExceptT (runStateT act cg )
-
-newVar :: MonadState CGState m => d -> m (Var d a)
-newVar d = do
-  i <- get
-  modify (+1)
-  return $ Var d i
+type VarId = Int
 
 instance Hashable D1 where
   hashWithSalt s (D1 a) = s `hashWithSalt` a
@@ -107,34 +90,37 @@ instance Hashable D1 where
 instance Hashable D2 where
   hashWithSalt s (D2 a b) = s `hashWithSalt` a `hashWithSalt` b
 
+instance Hashable D3 where
+  hashWithSalt s (D3 a b c) = s `hashWithSalt` a `hashWithSalt` b `hashWithSalt` c
+
 instance (Hashable d, Hashable a, V.Storable a) => Hashable (Tensor d a) where
   hashWithSalt s (Tensor d v) = s `hashWithSalt` d `hashWithSalt` (unsafeDupablePerformIO $ V.unsafeWith v return)
-
-instance (Hashable a, V.Storable a) => Hashable (Expr D1 a) where
-  hashWithSalt s (I t)     = s `hashWithSalt` d1Expr `hashWithSalt` iExpr  `hashWithSalt` t
-  hashWithSalt s (S f e)   = s `hashWithSalt` d1Expr `hashWithSalt` sExpr  `hashWithSalt` f `hashWithSalt` e
-  hashWithSalt s (a :.* b) = s `hashWithSalt` d1Expr `hashWithSalt` dmExpr `hashWithSalt` a `hashWithSalt` b
-  hashWithSalt s (a :.+ b) = s `hashWithSalt` d1Expr `hashWithSalt` daExpr `hashWithSalt` a `hashWithSalt` b
-  hashWithSalt s (a :<# b) = s `hashWithSalt` d1Expr `hashWithSalt` vmExpr `hashWithSalt` a `hashWithSalt` b
-  hashWithSalt s (a :#> b) = s `hashWithSalt` d1Expr `hashWithSalt` mvExpr `hashWithSalt` a `hashWithSalt` b
-
-instance (Hashable a, V.Storable a) => Hashable (Expr D2 a) where
-  hashWithSalt s (I t)     = s `hashWithSalt` d2Expr `hashWithSalt` iExpr   `hashWithSalt` t
-  hashWithSalt s (S f e)   = s `hashWithSalt` d2Expr `hashWithSalt` sExpr   `hashWithSalt` f `hashWithSalt` e
-  hashWithSalt s (a :.* b) = s `hashWithSalt` d2Expr `hashWithSalt` dmExpr  `hashWithSalt` a `hashWithSalt` b
-  hashWithSalt s (a :.+ b) = s `hashWithSalt` d2Expr `hashWithSalt` daExpr  `hashWithSalt` a `hashWithSalt` b
-  hashWithSalt s (a :%# b) = s `hashWithSalt` d2Expr `hashWithSalt` mtmExpr `hashWithSalt` a `hashWithSalt` b
-  hashWithSalt s (a :<> b) = s `hashWithSalt` d2Expr `hashWithSalt` ovvExpr `hashWithSalt` a `hashWithSalt` b
-
-d1Expr, d2Expr :: Int
-d1Expr = 1
-d2Expr = 2
-iExpr, sExpr, dmExpr, daExpr, vmExpr, mvExpr, mtmExpr, ovvExpr :: Int
-iExpr  = 0x100
-sExpr  = 0x101
-dmExpr = 0x102
-daExpr = 0x103
-vmExpr = 0x104
-mvExpr = 0x105
-mtmExpr= 0x106
-ovvExpr= 0x107
+--
+-- instance (Hashable a, V.Storable a) => Hashable (Expr D1 a) where
+--   hashWithSalt s (I t)     = s `hashWithSalt` d1Expr `hashWithSalt` iExpr  `hashWithSalt` t
+--   hashWithSalt s (S f e)   = s `hashWithSalt` d1Expr `hashWithSalt` sExpr  `hashWithSalt` f `hashWithSalt` e
+--   hashWithSalt s (a :.* b) = s `hashWithSalt` d1Expr `hashWithSalt` dmExpr `hashWithSalt` a `hashWithSalt` b
+--   hashWithSalt s (a :.+ b) = s `hashWithSalt` d1Expr `hashWithSalt` daExpr `hashWithSalt` a `hashWithSalt` b
+--   hashWithSalt s (a :<# b) = s `hashWithSalt` d1Expr `hashWithSalt` vmExpr `hashWithSalt` a `hashWithSalt` b
+--   hashWithSalt s (a :#> b) = s `hashWithSalt` d1Expr `hashWithSalt` mvExpr `hashWithSalt` a `hashWithSalt` b
+--
+-- instance (Hashable a, V.Storable a) => Hashable (Expr D2 a) where
+--   hashWithSalt s (I t)     = s `hashWithSalt` d2Expr `hashWithSalt` iExpr   `hashWithSalt` t
+--   hashWithSalt s (S f e)   = s `hashWithSalt` d2Expr `hashWithSalt` sExpr   `hashWithSalt` f `hashWithSalt` e
+--   hashWithSalt s (a :.* b) = s `hashWithSalt` d2Expr `hashWithSalt` dmExpr  `hashWithSalt` a `hashWithSalt` b
+--   hashWithSalt s (a :.+ b) = s `hashWithSalt` d2Expr `hashWithSalt` daExpr  `hashWithSalt` a `hashWithSalt` b
+--   hashWithSalt s (a :%# b) = s `hashWithSalt` d2Expr `hashWithSalt` mtmExpr `hashWithSalt` a `hashWithSalt` b
+--   hashWithSalt s (a :<> b) = s `hashWithSalt` d2Expr `hashWithSalt` ovvExpr `hashWithSalt` a `hashWithSalt` b
+--
+-- d1Expr, d2Expr :: Int
+-- d1Expr = 1
+-- d2Expr = 2
+-- iExpr, sExpr, dmExpr, daExpr, vmExpr, mvExpr, mtmExpr, ovvExpr :: Int
+-- iExpr  = 0x100
+-- sExpr  = 0x101
+-- dmExpr = 0x102
+-- daExpr = 0x103
+-- vmExpr = 0x104
+-- mvExpr = 0x105
+-- mtmExpr= 0x106
+-- ovvExpr= 0x107

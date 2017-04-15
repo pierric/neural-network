@@ -97,6 +97,25 @@ type EvalM = ExceptT EvalE (StateT EvalS IO)
 data EvalE = Fail Statement
   deriving (Show)
 
+data Var d a = Var {
+  _vdim :: d,
+  _vid  :: VarId
+} deriving (Typeable, Data, Eq)
+
+type CG = StateT CGState (ExceptT CGError IO)
+data CGError = CGSizeMismatchedTensors
+  deriving (Eq, Show)
+type CGState = VarId
+
+runCG :: CGState -> CG a -> IO (Either CGError (a, CGState))
+runCG cg act = runExceptT (runStateT act cg )
+
+newVar :: MonadState CGState m => d -> m (Var d a)
+newVar d = do
+  i <- get
+  modify (+1)
+  return $ Var d i
+
 compile :: (Dimension d, Element a) => Expr d a -> CG ([Statement], Var d a)
 compile (I t) = do
   v <- newVar (_tdim t)
