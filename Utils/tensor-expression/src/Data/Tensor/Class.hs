@@ -4,6 +4,7 @@ import qualified Data.Vector.Storable as PV
 import qualified Data.Vector.Storable.Mutable  as V
 import qualified Data.Vector.Storable.Internal as V
 import Text.Printf
+import Text.PrettyPrint.Free (Pretty(..), text, hcat)
 import Foreign.ForeignPtr (castForeignPtr)
 import Data.Typeable (cast)
 import Data.Data
@@ -22,7 +23,16 @@ data D2 = D2 {-# UNPACK #-}!Int {-# UNPACK #-}!Int
 data D3 = D3 {-# UNPACK #-}!Int {-# UNPACK #-}!Int {-# UNPACK #-}!Int
   deriving (Typeable, Data, Eq, Show)
 
-class (Show a, Eq a, Typeable a, Hashable a) => Dimension a where
+instance Pretty D1 where
+  pretty (D1 a) = hcat $ map text ["[",show a, "]"] 
+
+instance Pretty D2 where
+  pretty (D2 a b) = hcat $ map text ["[",show a, "×", show b, "]"] 
+
+instance Pretty D3 where
+  pretty (D3 a b c) = hcat $ map text ["[",show a, "×", show b, "×", show c, "]"] 
+
+class (Show a, Eq a, Typeable a, Hashable a, Pretty a) => Dimension a where
   size :: a -> Int
 
 instance Dimension D1 where

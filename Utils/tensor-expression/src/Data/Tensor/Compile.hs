@@ -1,29 +1,43 @@
 module Data.Tensor.Compile where
 
 import Data.Hashable
+import Text.Printf
 import Control.Monad.State.Strict
-import qualified Data.Tensor.Class as C
+import Control.Monad.Writer.Strict
+import qualified Data.Vector.Storable.Mutable  as V
+import Data.Typeable (cast)
+import Foreign.ForeignPtr (castForeignPtr)
+import System.IO.Unsafe (unsafeDupablePerformIO)
+import Text.PrettyPrint.Free (Pretty(..), Doc, hang, text, above, (<+>))
+import qualified Data.Tensor.Class as U
 import Data.Tensor.Class hiding (Expr(..))
 
-data TensorWrap e where
-  TensorWrap :: (Dimension d, Element e) => Tensor d e -> TensorWrap e
+newtype TensorWrap e = TensorWrap (V.IOVector e)
 
-instance Hashable e => Hashable (TensorWrap e) where
-  hashWithSalt s (TensorWrap t) = s `hashWithSalt` t
+instance V.Storable e => Hashable (TensorWrap e) where
+  hashWithSalt s (TensorWrap v) = s `hashWithSalt` V.length v `hashWithSalt` (unsafeDupablePerformIO $ V.unsafeWith v return)
 
+instance V.Storable e => Eq (TensorWrap e) where
+  TensorWrap t1@(V.MVector o1 p1) == TensorWrap t2@(V.MVector o2 p2) =
+    V.length t1 == V.length t2 && o1 == o2 && p1 == castForeignPtr p2
+
+instance V.Storable e => Show (TensorWrap e) where
+  show (TensorWrap t@(V.MVector o v)) = printf "<tensor_internal (%8d): %s + %4d>" (V.length t) (show v) o
 
 infix 7 :@
 infix 7 :>
 infix 3 :%
 
 data ExprAttr a e = a :@ ExprBody e (ExprAttr a e)
+  deriving (Eq)
 data ExprBody e x = L VarId x x
                   | V VarId
                   | I (TensorWrap e)
                   | S e x
                   | Bin ExprOp x x
+  deriving (Eq)
 data ExprOp = DM | DA | VM | MV | MTM | OVV
-  deriving Enum
+  deriving (Enum, Eq)
 
 attr :: ExprAttr a e -> a
 attr (a :@ _) = a
@@ -68,6 +82,10 @@ next_po (cxt :> PBL a o x :% e) = Just $ head_po $ cxt :> PBR a o e :% x
 next_po (cxt :> PBR a o x :% e) = Just $ cxt :% a :@ Bin o x e
 
 type CM = StateT VarId IO
+
+runCM :: CM a -> IO a
+runCM = flip evalStateT 0
+
 newVar :: CM VarId
 newVar = do
   i <- get
@@ -93,41 +111,73 @@ eliminate_common_expr e = do
     step tc@(cxt :% _ :@ L{}) = return tc
     step tc@(cxt :% _ :@ I{}) = return tc
     step    (cxt :% e  ) = do
-      v <- mk . V <$> newVar
-      let cxt' = go cxt (subst v e)
-      return (cxt' :% v)
+      v <- mk (dim_ce e) . V <$> newVar
+      (cxt, upd) <- runWriterT $ go cxt (subst v e)
+      return (cxt :% if getAny upd then v else e)
       where
-        go Nil              _ = Nil
-        go (c :> PLL a v x) f = go c f :> PLL a v (f x)
-        go (c :> PLR a v x) f = go c f :> PLR a v x
-        go (c :> PS a e)    f = go c f :> PS a e
-        go (c :> PBL a v x) f = go c f :> PBL a v (f x)
-        go (c :> PBR a v x) f = go c f :> PBR a v x
+        go Nil              _ = return Nil
+        go (c :> PLL a v x) f = do c <- go c f
+                                   x <- f x
+                                   return $ c :> PLL a v x
+        go (c :> PLR a v x) f = do c <- go c f
+                                   x <- f x
+                                   return $ c :> PLR a v x
+        go (c :> PS a e)    f = do c <- go c f
+                                   return $ c :> PS a e
+        go (c :> PBL a v x) f = do c <- go c f
+                                   x <- f x
+                                   return $ c :> PBL a v x
+        go (c :> PBR a v x) f = do c <- go c f
+                                   x <- f x
+                                   return $ c :> PBR a v x
 
-        subst v a b = if attr a == attr b
-                      then v
+        subst v a b = if hash_ce a == hash_ce b
+                      then tell (Any True) >> return v
                       else case b of
-                        u :@ L   w x y -> u :@ L   w (subst v a x) (subst v a y)
-                        u :@ S   w x   -> u :@ S   w (subst v a x)
-                        u :@ Bin w x y -> u :@ Bin w (subst v a x) (subst v a y)
+                        u :@ L   w x y -> do x <- subst v a x
+                                             y <- subst v a y
+                                             return $ u :@ L   w x y
+                        u :@ S   w x   -> do x <- subst v a x
+                                             return $ u :@ S   w x
+                        u :@ Bin w x y -> do x <- subst v a x
+                                             y <- subst v a y
+                                             return $ u :@ Bin w x y
+                        _              -> return b
 
-type ExprHashed = ExprAttr Int
-compile :: (Dimension d, Element e) => C.Expr d e -> ExprHashed e
-compile (C.I x)     = mk $ I (TensorWrap x)
-compile (C.S x y)   = mk $ S x (compile y)
-compile (x C.:.* y) = mk $ Bin DM  (compile x) (compile y)
-compile (x C.:.+ y) = mk $ Bin DA  (compile x) (compile y)
-compile (x C.:<# y) = mk $ Bin VM  (compile x) (compile y)
-compile (x C.:#> y) = mk $ Bin MV  (compile x) (compile y)
-compile (x C.:%# y) = mk $ Bin MTM (compile x) (compile y)
-compile (x C.:<> y) = mk $ Bin OVV (compile x) (compile y)
+data DimWrap where
+  DimWrap :: Dimension d => d -> DimWrap
 
-mk :: Element e => ExprBody e (ExprHashed e) -> ExprHashed e
-mk b@(I t)       = (iExpr `hashWithSalt` t) :@ b
-mk b@(V v)       = (vExpr `hashWithSalt` v) :@ b
-mk b@(L v x y)   = (lExpr `hashWithSalt` v `hashWithSalt` attr x `hashWithSalt` attr y) :@ b
-mk b@(S e x)     = (sExpr `hashWithSalt` e `hashWithSalt` attr x) :@ b
-mk b@(Bin o x y) = (bExpr `hashWithSalt` fromEnum o `hashWithSalt` attr x `hashWithSalt` attr y) :@ b
+instance Hashable DimWrap where
+  hashWithSalt s (DimWrap d) = hashWithSalt s d
+
+deriving instance Show DimWrap
+
+instance Eq DimWrap where
+  DimWrap d1 == DimWrap d2 = case cast d1 of
+                               Nothing -> False
+                               Just d1 -> d1 == d2
+
+type ExprHashed = ExprAttr (DimWrap, Int)
+
+dim_ce  = fst. attr
+hash_ce = snd . attr
+
+compile :: (Dimension d, Element e) => U.Expr d e -> ExprHashed e
+compile e@(U.I x)     = mk (DimWrap $ dim e) $ I (TensorWrap $ _tdat x)
+compile e@(U.S x y)   = mk (DimWrap $ dim e) $ S x (compile y)
+compile e@(x U.:.* y) = mk (DimWrap $ dim e) $ Bin DM  (compile x) (compile y)
+compile e@(x U.:.+ y) = mk (DimWrap $ dim e) $ Bin DA  (compile x) (compile y)
+compile e@(x U.:<# y) = mk (DimWrap $ dim e) $ Bin VM  (compile x) (compile y)
+compile e@(x U.:#> y) = mk (DimWrap $ dim e) $ Bin MV  (compile x) (compile y)
+compile e@(x U.:%# y) = mk (DimWrap $ dim e) $ Bin MTM (compile x) (compile y)
+compile e@(x U.:<> y) = mk (DimWrap $ dim e) $ Bin OVV (compile x) (compile y)
+
+mk :: Element e => DimWrap -> ExprBody e (ExprHashed e) -> ExprHashed e
+mk d b@(I t)       = (d, iExpr `hashWithSalt` t) :@ b
+mk d b@(V v)       = (d, vExpr `hashWithSalt` v) :@ b
+mk d b@(L v x y)   = (d, lExpr `hashWithSalt` v `hashWithSalt` attr x `hashWithSalt` attr y) :@ b
+mk d b@(S e x)     = (d, sExpr `hashWithSalt` e `hashWithSalt` attr x) :@ b
+mk d b@(Bin o x y) = (d, bExpr `hashWithSalt` fromEnum o `hashWithSalt` attr x `hashWithSalt` attr y) :@ b
 
 iExpr, vExpr, lExpr, sExpr, bExpr :: Int
 iExpr = 0
@@ -135,3 +185,30 @@ vExpr = 1
 lExpr = 2
 sExpr = 3
 bExpr = 4
+
+instance Pretty DimWrap where
+  pretty (DimWrap d) = pretty d
+
+instance (Pretty e, V.Storable e) => Pretty (ExprHashed e) where
+  pretty (a :@ (L v x y))   = hang 4 $ (pretty (fst a) <+> text "L")
+                                `above` pretty x
+                                `above` pretty y
+  pretty (a :@ (V v))       = hang 4 $ (pretty (fst a) <+> text "V")
+  pretty (a :@ (I i))       = hang 4 $ (pretty (fst a) <+> text "I")
+                                `above` text (show i)
+  pretty (a :@ (S f x))     = hang 4 $ (pretty (fst a) <+> text "S")
+                                `above` pretty x
+  pretty (a :@ (Bin o x y)) = hang 4 $ (pretty (fst a) <+> text "B" <+> pretty o)
+                                `above` pretty x
+                                `above` pretty y
+
+instance Pretty ExprOp where
+  pretty DM  = text ".*"
+  pretty DA  = text ".+"
+  pretty VM  = text "<#"
+  pretty MV  = text "#>"
+  pretty MTM = text "ᵀ×"
+  pretty OVV = text "⊗"
+
+instance (Pretty e, V.Storable e) => Show (ExprHashed e) where
+  show = show . pretty

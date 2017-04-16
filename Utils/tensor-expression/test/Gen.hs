@@ -10,6 +10,7 @@ import Control.Monad.Reader
 import Control.Monad.Trans.Maybe
 import System.IO.Unsafe (unsafePerformIO)
 import Data.Tensor
+import qualified Data.Tensor.Compile as C
 
 esize :: Expr d a -> Int
 esize (I _)   = 1
@@ -107,3 +108,15 @@ genSmallDimension = getPositive <$> resize 40 arbitrary
 
 genSmallFraction :: (Fractional a, Arbitrary a) => Gen a
 genSmallFraction  = resize 5 arbitrary
+
+instance (Arbitrary a, Element a) => Arbitrary (C.ExprHashed a) where
+  arbitrary = oneof [genE1, genE2]
+    where
+      genE1 :: (Arbitrary a, Element a) => Gen (C.ExprHashed a)
+      genE1 = do
+        e :: Expr D1 a <- arbitrary
+        return $ C.compile e
+      genE2 :: (Arbitrary a, Element a) => Gen (C.ExprHashed a)
+      genE2 = do
+        e :: Expr D2 a <- arbitrary
+        return $ C.compile e

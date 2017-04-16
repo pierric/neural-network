@@ -43,15 +43,17 @@ test-suite simple
   type:               exitcode-stdio-1.0
   hs-source-dirs:     test
   main-is:            Simple.hs
-  other-modules:      Hmatrix, Gen
+  other-modules:      Hmatrix, Gen, Comp
   build-depends:      hspec, QuickCheck, base >= 4.7 && < 5, vector, hmatrix, tensor-expression,
-                      mtl, transformers
+                      mtl, transformers, wl-pprint-extras
   default-language:   Haskell2010
+  default-extensions: ScopedTypeVariables
 
 executable playground
   hs-source-dirs:     test
   main-is:            Playground.hs
-  other-modules:      Hmatrix, Gen
+  other-modules:      Hmatrix, Gen, Comp
   build-depends:      hspec, QuickCheck, base >= 4.7 && < 5, vector, hmatrix, tensor-expression,
-                      mtl, transformers
+                      mtl, transformers, wl-pprint-extras
   default-language:   Haskell2010
+  default-extensions: ScopedTypeVariables

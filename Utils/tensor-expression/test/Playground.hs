@@ -4,8 +4,11 @@ import qualified Data.Vector.Storable as PV
 import Control.Monad
 import Test.QuickCheck
 import Data.List
-import Data.Tensor
+import Text.PrettyPrint.Free (pretty)
+import Data.Tensor (Tensor(..), D1(..), D2(..))
+import Data.Tensor.Compile
 import Gen
+import Comp
 import Hmatrix
 
 main = do
@@ -30,20 +33,35 @@ main = do
   -- es <- generate (sequence $ replicate 40 $ resize 20 $ (arbitrary :: Gen (Expr D1 Float)))
   -- print $ sort $ map esize es
 
-  t1 <- generate $ genTensor (D1 11)
-  t2 <- generate $ genTensor (D1 11)
-  t3 <- generate $ genTensor (D2 11 4)
-  t4 <- generate $ genTensor (D2 4 8)
-  t5 <- generate $ genTensor (D2 11 8)
-  t6 <- generate $ genTensor (D1 4)
-  t7 <- generate $ genTensor (D1 4)
-  t8 <- generate $ genTensor (D1 4)
-  t9 <- generate $ genTensor (D1 4)
-  t10<- generate $ genTensor (D1 4)
-  let e :: Expr D1 Float
-      e = (((I t1 :.+ I t2) :<# (S (-26.0) (I t3 :.+ (I t4 :%# I t5)))) :.+ (I t6 :.* I t7) ) :.+ (I t8 :.* (I t9 :.+ I t10))
-  -- tx <- eval' e
-  -- putStrLn $ show $ t2hv tx
-  -- ty <- eval  e
-  -- putStrLn $ show $ t2hv ty
-  sequence_ $ replicate 500 $ eval e
+  -- t1 <- generate $ genTensor (D1 11)
+  -- t2 <- generate $ genTensor (D1 11)
+  -- t3 <- generate $ genTensor (D2 11 4)
+  -- t4 <- generate $ genTensor (D2 4 8)
+  -- t5 <- generate $ genTensor (D2 11 8)
+  -- t6 <- generate $ genTensor (D1 4)
+  -- t7 <- generate $ genTensor (D1 4)
+  -- t8 <- generate $ genTensor (D1 4)
+  -- t9 <- generate $ genTensor (D1 4)
+  -- t10<- generate $ genTensor (D1 4)
+  -- let e :: Expr D1 Float
+  --     e = (((I t1 :.+ I t2) :<# (S (-26.0) (I t3 :.+ (I t4 :%# I t5)))) :.+ (I t6 :.* I t7) ) :.+ (I t8 :.* (I t9 :.+ I t10))
+  -- sequence_ $ replicate 500 $ eval e
+
+  t1 <- generate $ genTensor (D2 25 38) :: IO (Tensor D2 Float)
+  t2 <- generate $ genTensor (D1    38) :: IO (Tensor D1 Float)
+  let oe = (DimWrap (D1 25),11111111) :@ Bin MV 
+              ((DimWrap (D2 25 38), 22222222) :@ I (TensorWrap $ _tdat t1))
+              ((DimWrap (D1 38), 3333333)     :@ I (TensorWrap $ _tdat t2))
+  se <- generate (resize 2 arbitrary)
+  ie <- insert_ce 2 se oe
+
+  ee <- runCM (eliminate_common_expr ie)
+
+  putStrLn $ show $ pretty oe
+  putStrLn $ "------------------"
+  putStrLn $ show $ pretty se
+  putStrLn $ "------------------"
+  putStrLn $ show $ pretty ie
+  putStrLn $ "------------------"
+  putStrLn $ show $ pretty ee
+  return ()
