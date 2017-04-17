@@ -47,15 +47,19 @@ main = do
   --     e = (((I t1 :.+ I t2) :<# (S (-26.0) (I t3 :.+ (I t4 :%# I t5)))) :.+ (I t6 :.* I t7) ) :.+ (I t8 :.* (I t9 :.+ I t10))
   -- sequence_ $ replicate 500 $ eval e
 
-  t1 <- generate $ genTensor (D2 25 38) :: IO (Tensor D2 Float)
-  t2 <- generate $ genTensor (D1    38) :: IO (Tensor D1 Float)
-  let oe = (DimWrap (D1 25),11111111) :@ Bin MV 
-              ((DimWrap (D2 25 38), 22222222) :@ I (TensorWrap $ _tdat t1))
-              ((DimWrap (D1 38), 3333333)     :@ I (TensorWrap $ _tdat t2))
+  t1 <- generate $ genTensor (D2 4 9) :: IO (Tensor D2 Float)
+  t2 <- generate $ genTensor (D2 4 9) :: IO (Tensor D2 Float)
+  t3 <- generate $ genTensor (D2 4 9) :: IO (Tensor D2 Float)
+  let oe = (DimWrap (D2 4 9),11111111) :@ Bin DM
+              ((DimWrap (D2 4 9), 22222222) :@ S 1
+                  ((DimWrap (D2 4 9), 333333) :@ I (TensorWrap $ _tdat t1)))
+              ((DimWrap (D2 4 9), 444) :@ Bin DM
+                  ((DimWrap (D2 4 9), 55) :@ I (TensorWrap $ _tdat t2))
+                  ((DimWrap (D2 4 9), 66) :@ I (TensorWrap $ _tdat t3)))
   se <- generate (resize 2 arbitrary)
-  ie <- insert_ce 2 se oe
-
+  (ie,_) <- insert_ce 2 se oe
   ee <- runCM (eliminate_common_expr ie)
+  let df = diff_ce ee ie
 
   putStrLn $ show $ pretty oe
   putStrLn $ "------------------"
@@ -64,4 +68,6 @@ main = do
   putStrLn $ show $ pretty ie
   putStrLn $ "------------------"
   putStrLn $ show $ pretty ee
+  putStrLn $ "------------------"
+  putStrLn $ show $ pretty df
   return ()

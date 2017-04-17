@@ -39,8 +39,8 @@ diff_ce e1 e2 = execWriter (go e1 e2)
 
              | otherwise = tell [(e1,e2)]
 
-insert_ce :: (Element a, Arbitrary a) => Int -> C.ExprHashed a -> C.ExprHashed a -> IO (C.ExprHashed a)
-insert_ce n s e = evalStateT (go replace e) ()
+insert_ce :: (Element a, Arbitrary a) => Int -> C.ExprHashed a -> C.ExprHashed a -> IO (C.ExprHashed a, Int)
+insert_ce n s e = runStateT (go replace e) 0
   where
     go :: Monad m => (C.ExprAttr a e -> m (C.ExprAttr a e)) -> C.ExprAttr a e -> m (C.ExprAttr a e)
     go f (a C.:@ C.L v x y)   = do x <- go f x
@@ -56,8 +56,13 @@ insert_ce n s e = evalStateT (go replace e) ()
     count e = modify (+1) >> return e
     leaf = execState (go count e) 0
 
-    replace e = do g <- liftIO $ generate $ choose (1,leaf)
-                   if g <= n then liftIO $ generate $ adapt e s else return e
+    replace e = do g <- liftIO $ generate $ choose (0,leaf)
+                   if g <= n 
+                     then do
+                       modify (+1)
+                       liftIO $ generate $ adapt e s
+                     else 
+                       return e
     adapt e s = case (C.dim_ce e, C.dim_ce s) of
                   (C.DimWrap d1, C.DimWrap d2)
                     | Just (D1 a)   <- cast d1
@@ -83,6 +88,7 @@ insert_ce n s e = evalStateT (go replace e) ()
         gen1 d = liftM (C.compile . fromJust) $ runGenM 2 (genExp1D d)
 
 notVI :: C.ExprHashed Float -> Bool
-notVI (_ C.:@ C.I _) = False
-notVI (_ C.:@ C.V _) = False
-notVI _              = True
+notVI (_ C.:@ C.I _)   = False
+notVI (_ C.:@ C.V _)   = False
+notVI (_ C.:@ C.S _ e) = notVI e
+notVI _                = True

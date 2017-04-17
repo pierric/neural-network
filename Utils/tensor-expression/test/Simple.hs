@@ -6,6 +6,7 @@ import Test.QuickCheck hiding (scale)
 import qualified Data.Vector.Storable as PV
 import Control.Monad
 import Data.Tensor
+import Data.Tensor.Compile (runCM, eliminate_common_expr)
 import Comp
 import Hmatrix
 import Gen
@@ -209,10 +210,12 @@ main = hspec $ do
   describe "CSE" $ do
     it "one common sub-expr" $ do
       forAll (arbitrary `suchThat` notVI) $ \e -> ioProperty $ do
-        s  <- generate arbitrary
-        e' <- insert_ce 2 s e
-        let (vs, ss) = unzip (diff_ce e e')
-        return $ not (null vs)                     -- at least one common sub-expr
-              && and (map (== head vs) (tail vs))  -- all subst'd var  are the same
-              && and (map (== s) ss)               -- all subst'd expr are the same
+        s  <- generate (resize 3 arbitrary)
+        (e1, rc) <- insert_ce 2 s e
+        e2 <- runCM (eliminate_common_expr e1)
+        let (vs, ss) = unzip (diff_ce e2 e1)
+        return $ 
+          (rc >= 2) ==> not (null vs)                     -- at least one common sub-expr
+                     && and (map (== head vs) (tail vs))  -- all subst'd var  are the same
+                     && and (map (== s) ss)               -- all subst'd expr are the same
 
