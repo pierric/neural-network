@@ -58,7 +58,7 @@ main = do
                   ((DimWrap (D2 4 9), 66) :@ I (TensorWrap $ _tdat t3)))
   se <- generate (resize 2 arbitrary)
   (ie,_) <- insert_ce 2 se oe
-  ee <- runCM (eliminate_common_expr ie)
+  let ee = eliminate_common_expr ie
   let df = diff_ce ee ie
 
   putStrLn $ show $ pretty oe

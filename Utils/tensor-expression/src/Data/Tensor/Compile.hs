@@ -13,6 +13,8 @@ import qualified Data.Tensor.Class as U
 import Data.Tensor.Class hiding (Expr(..))
 
 newtype TensorWrap e = TensorWrap (V.IOVector e)
+data DimWrap where
+  DimWrap :: Dimension d => d -> DimWrap
 
 instance V.Storable e => Hashable (TensorWrap e) where
   hashWithSalt s (TensorWrap v) = s `hashWithSalt` V.length v `hashWithSalt` (unsafeDupablePerformIO $ V.unsafeWith v return)
@@ -23,6 +25,16 @@ instance V.Storable e => Eq (TensorWrap e) where
 
 instance V.Storable e => Show (TensorWrap e) where
   show (TensorWrap t@(V.MVector o v)) = printf "<tensor_internal (%8d): %s + %4d>" (V.length t) (show v) o
+
+instance Hashable DimWrap where
+  hashWithSalt s (DimWrap d) = hashWithSalt s d
+
+deriving instance Show DimWrap
+
+instance Eq DimWrap where
+  DimWrap d1 == DimWrap d2 = case cast d1 of
+                               Nothing -> False
+                               Just d1 -> d1 == d2
 
 infix 7 :@
 infix 7 :>
@@ -44,6 +56,36 @@ attr (a :@ _) = a
 
 body :: ExprAttr a e -> ExprBody e (ExprAttr a e)
 body (_ :@ b) = b
+
+type ExprHashed = ExprAttr (DimWrap, Int)
+
+attr_dim  = fst. attr
+attr_hash = snd . attr
+
+toExprHashed :: (Dimension d, Element e) => U.Expr d e -> ExprHashed e
+toExprHashed e@(U.I x)     = mk_hash (DimWrap $ dim e) $ I (TensorWrap $ _tdat x)
+toExprHashed e@(U.S x y)   = mk_hash (DimWrap $ dim e) $ S x (toExprHashed y)
+toExprHashed e@(x U.:.* y) = mk_hash (DimWrap $ dim e) $ Bin DM  (toExprHashed x) (toExprHashed y)
+toExprHashed e@(x U.:.+ y) = mk_hash (DimWrap $ dim e) $ Bin DA  (toExprHashed x) (toExprHashed y)
+toExprHashed e@(x U.:<# y) = mk_hash (DimWrap $ dim e) $ Bin VM  (toExprHashed x) (toExprHashed y)
+toExprHashed e@(x U.:#> y) = mk_hash (DimWrap $ dim e) $ Bin MV  (toExprHashed x) (toExprHashed y)
+toExprHashed e@(x U.:%# y) = mk_hash (DimWrap $ dim e) $ Bin MTM (toExprHashed x) (toExprHashed y)
+toExprHashed e@(x U.:<> y) = mk_hash (DimWrap $ dim e) $ Bin OVV (toExprHashed x) (toExprHashed y)
+
+mk_hash :: Element e => DimWrap -> ExprBody e (ExprHashed e) -> ExprHashed e
+mk_hash d b@(I t)       = (d, i_expr `hashWithSalt` t) :@ b
+mk_hash d b@(V v)       = (d, v_expr `hashWithSalt` v) :@ b
+mk_hash d b@(L v x y)   = (d, l_expr `hashWithSalt` v `hashWithSalt` attr x `hashWithSalt` attr y) :@ b
+mk_hash d b@(S e x)     = (d, s_expr `hashWithSalt` e `hashWithSalt` attr x) :@ b
+mk_hash d b@(Bin o x y) = (d, b_expr `hashWithSalt` fromEnum o `hashWithSalt` attr x `hashWithSalt` attr y) :@ b
+
+i_expr = 0 :: Int 
+v_expr = 1 :: Int
+l_expr = 2 :: Int
+s_expr = 3 :: Int
+b_expr = 4 :: Int
+
+-----------------------------------------------------------------------------------------
 
 -- Cxt is the derivative of ExprAttr
 data Cxt  a e = Nil | Cxt a e :> Path a e (ExprAttr a e)
@@ -81,25 +123,37 @@ next_po (cxt :> PS  a f   :% e) = Just $ cxt :% a :@ S f e
 next_po (cxt :> PBL a o x :% e) = Just $ head_po $ cxt :> PBR a o e :% x
 next_po (cxt :> PBR a o x :% e) = Just $ cxt :% a :@ Bin o x e
 
-type CM = StateT VarId IO
 
-runCM :: CM a -> IO a
-runCM = flip evalStateT 0
+data CodeTransState = CodeTransState { _cts_vid :: VarId, _cts_bounds :: [VarId] }
+type CodeTrans = State CodeTransState
 
-newVar :: CM VarId
+runCodeTrans :: CodeTrans a -> a
+runCodeTrans = flip evalState (CodeTransState 0 [])
+
+newVar :: CodeTrans VarId
 newVar = do
-  i <- get
-  modify (+1)
+  i <- _cts_vid <$> get
+  modify (\s -> s{_cts_vid=i+1})
   return $ i
 
-eliminate_common_expr :: Element e => ExprHashed e -> CM (ExprHashed e)
-eliminate_common_expr e = do
-  Nil :% e <- rp . head_po $ Nil :% e
+bindVar :: VarId -> CodeTrans ()
+bindVar vid = do
+  bnds <- _cts_bounds <$> get
+  if vid `elem` bnds 
+    then
+      error $ "variable " ++ show vid ++ " already bound."
+    else
+      modify (\s -> s{_cts_bounds = vid:bnds})
+
+eliminate_common_expr :: Element e => ExprHashed e -> ExprHashed e
+eliminate_common_expr e = runCodeTrans $ do
+  Nil :% e <- repeat_step (head_po $ Nil :% e)
   return e
   where
-    rp ec = do
-      ec <- step ec
-      maybe (return $ root ec) rp (next_po ec)
+    repeat_step ec = do
+      rt <- step ec
+      ec <- maybe (return ec) (\(v,e) -> bindVar v >> return e) rt
+      maybe (return $ root ec) repeat_step (next_po ec)
 
     -- at a position of the expression, try matching with the tree at focus
     -- to all following positions (post-order), resulting in possibly updated
@@ -107,13 +161,17 @@ eliminate_common_expr e = do
     --
     -- Note that it is not necessary to match I and V, for they cost nothing.
     -- And L neither, because it won't appear later.
-    step tc@(cxt :% _ :@ V{}) = return tc
-    step tc@(cxt :% _ :@ L{}) = return tc
-    step tc@(cxt :% _ :@ I{}) = return tc
+    step tc@(cxt :% _ :@ V{}) = return Nothing
+    step tc@(cxt :% _ :@ L{}) = return Nothing
+    step tc@(cxt :% _ :@ I{}) = return Nothing
     step    (cxt :% e  ) = do
-      v <- mk (dim_ce e) . V <$> newVar
+      vid <- newVar
+      let v = mk_hash (attr_dim e) (V vid)
       (cxt, upd) <- runWriterT $ go cxt (subst v e)
-      return (cxt :% if getAny upd then v else e)
+      return $ 
+        if getAny upd 
+          then Just (vid, cxt :% v)
+          else Nothing
       where
         go Nil              _ = return Nil
         go (c :> PLL a v x) f = do c <- go c f
@@ -131,7 +189,7 @@ eliminate_common_expr e = do
                                    x <- f x
                                    return $ c :> PBR a v x
 
-        subst v a b = if hash_ce a == hash_ce b
+        subst v a b = if attr_hash a == attr_hash b
                       then tell (Any True) >> return v
                       else case b of
                         u :@ L   w x y -> do x <- subst v a x
@@ -144,47 +202,7 @@ eliminate_common_expr e = do
                                              return $ u :@ Bin w x y
                         _              -> return b
 
-data DimWrap where
-  DimWrap :: Dimension d => d -> DimWrap
-
-instance Hashable DimWrap where
-  hashWithSalt s (DimWrap d) = hashWithSalt s d
-
-deriving instance Show DimWrap
-
-instance Eq DimWrap where
-  DimWrap d1 == DimWrap d2 = case cast d1 of
-                               Nothing -> False
-                               Just d1 -> d1 == d2
-
-type ExprHashed = ExprAttr (DimWrap, Int)
-
-dim_ce  = fst. attr
-hash_ce = snd . attr
-
-compile :: (Dimension d, Element e) => U.Expr d e -> ExprHashed e
-compile e@(U.I x)     = mk (DimWrap $ dim e) $ I (TensorWrap $ _tdat x)
-compile e@(U.S x y)   = mk (DimWrap $ dim e) $ S x (compile y)
-compile e@(x U.:.* y) = mk (DimWrap $ dim e) $ Bin DM  (compile x) (compile y)
-compile e@(x U.:.+ y) = mk (DimWrap $ dim e) $ Bin DA  (compile x) (compile y)
-compile e@(x U.:<# y) = mk (DimWrap $ dim e) $ Bin VM  (compile x) (compile y)
-compile e@(x U.:#> y) = mk (DimWrap $ dim e) $ Bin MV  (compile x) (compile y)
-compile e@(x U.:%# y) = mk (DimWrap $ dim e) $ Bin MTM (compile x) (compile y)
-compile e@(x U.:<> y) = mk (DimWrap $ dim e) $ Bin OVV (compile x) (compile y)
-
-mk :: Element e => DimWrap -> ExprBody e (ExprHashed e) -> ExprHashed e
-mk d b@(I t)       = (d, iExpr `hashWithSalt` t) :@ b
-mk d b@(V v)       = (d, vExpr `hashWithSalt` v) :@ b
-mk d b@(L v x y)   = (d, lExpr `hashWithSalt` v `hashWithSalt` attr x `hashWithSalt` attr y) :@ b
-mk d b@(S e x)     = (d, sExpr `hashWithSalt` e `hashWithSalt` attr x) :@ b
-mk d b@(Bin o x y) = (d, bExpr `hashWithSalt` fromEnum o `hashWithSalt` attr x `hashWithSalt` attr y) :@ b
-
-iExpr, vExpr, lExpr, sExpr, bExpr :: Int
-iExpr = 0
-vExpr = 1
-lExpr = 2
-sExpr = 3
-bExpr = 4
+-----------------------------------------------------------------------------------------
 
 instance Pretty DimWrap where
   pretty (DimWrap d) = pretty d

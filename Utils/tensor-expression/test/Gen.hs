@@ -115,8 +115,8 @@ instance (Arbitrary a, Element a) => Arbitrary (C.ExprHashed a) where
       genE1 :: (Arbitrary a, Element a) => Gen (C.ExprHashed a)
       genE1 = do
         e :: Expr D1 a <- arbitrary
-        return $ C.compile e
+        return $ C.toExprHashed e
       genE2 :: (Arbitrary a, Element a) => Gen (C.ExprHashed a)
       genE2 = do
         e :: Expr D2 a <- arbitrary
-        return $ C.compile e
+        return $ C.toExprHashed e

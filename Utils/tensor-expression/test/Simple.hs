@@ -6,7 +6,7 @@ import Test.QuickCheck hiding (scale)
 import qualified Data.Vector.Storable as PV
 import Control.Monad
 import Data.Tensor
-import Data.Tensor.Compile (runCM, eliminate_common_expr)
+import Data.Tensor.Compile (eliminate_common_expr)
 import Comp
 import Hmatrix
 import Gen
@@ -212,7 +212,7 @@ main = hspec $ do
       forAll (arbitrary `suchThat` notVI) $ \e -> ioProperty $ do
         s  <- generate (resize 3 arbitrary)
         (e1, rc) <- insert_ce 2 s e
-        e2 <- runCM (eliminate_common_expr e1)
+        let e2 = eliminate_common_expr e1
         let (vs, ss) = unzip (diff_ce e2 e1)
         return $ 
           (rc >= 2) ==> not (null vs)                     -- at least one common sub-expr
