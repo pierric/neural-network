@@ -151,8 +151,8 @@ eliminate_common_expr e = runCodeTrans $ do
   return e
   where
     repeat_step ec = do
-      rt <- step ec
-      ec <- maybe (return ec) (\(v,e) -> bindVar v >> return e) rt
+      (bv, ec) <- step ec
+      sequence_ (bindVar <$> bv)
       maybe (return $ root ec) repeat_step (next_po ec)
 
     -- at a position of the expression, try matching with the tree at focus
@@ -161,17 +161,17 @@ eliminate_common_expr e = runCodeTrans $ do
     --
     -- Note that it is not necessary to match I and V, for they cost nothing.
     -- And L neither, because it won't appear later.
-    step tc@(cxt :% _ :@ V{}) = return Nothing
-    step tc@(cxt :% _ :@ L{}) = return Nothing
-    step tc@(cxt :% _ :@ I{}) = return Nothing
+    step tc@(cxt :% _ :@ V{}) = return (Nothing, tc)
+    step tc@(cxt :% _ :@ L{}) = return (Nothing, tc)
+    step tc@(cxt :% _ :@ I{}) = return (Nothing, tc)
     step    (cxt :% e  ) = do
       vid <- newVar
       let v = mk_hash (attr_dim e) (V vid)
       (cxt, upd) <- runWriterT $ go cxt (subst v e)
       return $ 
         if getAny upd 
-          then Just (vid, cxt :% v)
-          else Nothing
+          then (Just vid, cxt :% v)
+          else (Nothing , cxt :% e)
       where
         go Nil              _ = return Nil
         go (c :> PLL a v x) f = do c <- go c f
