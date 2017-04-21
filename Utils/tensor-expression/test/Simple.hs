@@ -4,9 +4,11 @@ module Main where
 import Test.Hspec
 import Test.QuickCheck hiding (scale)
 import qualified Data.Vector.Storable as PV
+import Data.Typeable (cast)
 import Control.Monad
+import Control.Monad.Trans (liftIO)
 import Data.Tensor
-import Data.Tensor.Compile (eliminate_common_expr)
+import Data.Tensor.Compile (ExprHashed, DimWrap(..), TensorWrap(..), attrDim)
 import Comp
 import Hmatrix
 import Gen
@@ -208,14 +210,36 @@ main = hspec $ do
       t2 <- eval  e
       eq t1 t2
   describe "CSE" $ do
-    it "one common sub-expr" $ do
+    it "substitutes one common sub-expr" $ do
       forAll (arbitrary `suchThat` notVI) $ \e -> ioProperty $ do
         s  <- generate (resize 3 arbitrary)
         (e1, rc) <- insert_ce 2 s e
-        let e2 = eliminate_common_expr e1
+        let e2 = fst $ elimCommonExpr e1
         let (vs, ss) = unzip (diff_ce e2 e1)
         return $ 
           (rc >= 2) ==> not (null vs)                     -- at least one common sub-expr
                      && and (map (== head vs) (tail vs))  -- all subst'd var  are the same
                      && and (map (== s) ss)               -- all subst'd expr are the same
+    it "preserve value" $ do
+      forAll (arbitrary `suchThat` notVI) $ \e -> ioProperty $ do
+        s  <- generate (resize 3 arbitrary)
+        (e1, rc) <- insert_ce 2 s e
+        let e2 = uncurry qualify $ elimCommonExpr e1
+        t1 <- evalExprHashed e1
+        t2 <- evalExprHashed e2
+        case (t1, t2) of 
+          (TensorWrap t1, TensorWrap t2) 
+            | Just t2 <- cast t2 -> eq t1 t2
+            | otherwise          -> return $ property False
 
+evalExprHashed :: Element e => ExprHashed e -> IO (TensorWrap e)
+evalExprHashed e = do
+  case attrDim e of
+    DimWrap d -> do
+      t <- newTensor d
+      handleE $ runCG initCG $ do
+        (st, v) <- toStatements e
+        liftIO $ execute $ st ++ [Store v (TensorWrap t)]
+      return (TensorWrap t)
+  where
+    handleE act = act >>= either (ioError . userError . show) return

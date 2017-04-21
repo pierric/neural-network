@@ -1,6 +1,7 @@
 module Data.Tensor.Prop where
 
 import Data.Tensor.Class
+import Data.Tensor.Compile (TensorWrap(..))
 import Data.Tensor.Execute
 import qualified Data.Set as S
 import Control.Monad.Except
@@ -21,17 +22,17 @@ data VarUsage = Make  { _vu_mt :: MakeType, _vuid :: Int }
 isMake (Make _ _) = True
 isMake _          = False
 
-vars :: [Statement] -> [VarUsage]
+vars :: [Statement a] -> [VarUsage]
 vars = nub . concat . map varUsage
 
-varUsage :: Statement -> [VarUsage]
-varUsage (Alloc v)   = [Make MakeAlloc $ _vid v]
+varUsage :: Statement a -> [VarUsage]
+varUsage (Alloc d v) = [Make MakeAlloc $ _vid v]
 varUsage (Bind  v _) = [Make MakeBind  $ _vid v]
 varUsage (Store v _) = [Write $ _vid v]
 varUsage (Copy  v w) = [Read (_vid v), Write (_vid w)]
-varUsage (BlasGEMV _ _ v1 v2 _ _ v3)   = [Read $ _vid v1,Read $ _vid v2,Write $ _vid v3]
-varUsage (BlasGERU _ v1 v2 _ v3)       = [Read $ _vid v1,Read $ _vid v2,Write $ _vid v3]
-varUsage (BlasGEMM _ _ v1 _ v2 _ _ v3) = [Read $ _vid v1,Read $ _vid v2,Write $ _vid v3]
+varUsage (BlasGEMV _ _ v1 v2 _ _ v3)   = [Read $ _vid_VarWithDim v1,Read $ _vid_VarWithDim v2,Write $ _vid_VarWithDim v3]
+varUsage (BlasGERU _ v1 v2 _ v3)       = [Read $ _vid_VarWithDim v1,Read $ _vid_VarWithDim v2,Write $ _vid_VarWithDim v3]
+varUsage (BlasGEMM _ _ v1 _ v2 _ _ v3) = [Read $ _vid_VarWithDim v1,Read $ _vid_VarWithDim v2,Write $ _vid_VarWithDim v3]
 varUsage (DotAdd v1 v2 v3)             = [Read $ _vid v1,Read $ _vid v2,Write $ _vid v3]
 varUsage (DotMul v1 v2 v3)             = [Read $ _vid v1,Read $ _vid v2,Write $ _vid v3]
 varUsage (DotSca _ v1 v2)              = [Read $ _vid v1,Write $ _vid v2]
@@ -42,11 +43,11 @@ data Error = MakeTwice     VarUsage
 
 read_of_var  vid s = Read  vid `elem` varUsage s
 write_of_var vid s = Write vid `elem` varUsage s
-bind_of_tensor :: Dimension d => Tensor d a -> [Statement] -> [Int]
+bind_of_tensor :: Dimension d => Tensor d a -> [Statement a] -> [Int]
 bind_of_tensor t st = catMaybes $ map match st
   where
-    match (Bind v t1) = if eqTensor t t1 then Just (_vid v) else Nothing
-    match _           = Nothing
+    match (Bind v (TensorWrap t1)) = if eqTensor t t1 then Just (_vid v) else Nothing
+    match _ = Nothing
 
 prop_no_make_twice st = isRight $ runIdentity $ runExceptT $ runStateT (check st) S.empty
   where
@@ -81,5 +82,5 @@ prop_no_read_tensor_after_write_var st t vid =
       wv  = map fst $ filter (write_of_var vid . snd) ist
   in null wv || null rt || minimum wv > maximum rt
 
-prop_only_make_var :: [Statement] -> Bool
+prop_only_make_var :: [Statement a] -> Bool
 prop_only_make_var = and . map isMake . concatMap varUsage

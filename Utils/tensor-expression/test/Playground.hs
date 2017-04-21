@@ -52,13 +52,13 @@ main = do
   t3 <- generate $ genTensor (D2 4 9) :: IO (Tensor D2 Float)
   let oe = (DimWrap (D2 4 9),11111111) :@ Bin DM
               ((DimWrap (D2 4 9), 22222222) :@ S 1
-                  ((DimWrap (D2 4 9), 333333) :@ I (TensorWrap $ _tdat t1)))
+                  ((DimWrap (D2 4 9), 333333) :@ I (TensorWrap t1)))
               ((DimWrap (D2 4 9), 444) :@ Bin DM
-                  ((DimWrap (D2 4 9), 55) :@ I (TensorWrap $ _tdat t2))
-                  ((DimWrap (D2 4 9), 66) :@ I (TensorWrap $ _tdat t3)))
+                  ((DimWrap (D2 4 9), 55) :@ I (TensorWrap t2))
+                  ((DimWrap (D2 4 9), 66) :@ I (TensorWrap t3)))
   se <- generate (resize 2 arbitrary)
   (ie,_) <- insert_ce 2 se oe
-  let ee = eliminate_common_expr ie
+  let ee = fst $ elimCommonExpr ie
   let df = diff_ce ee ie
 
   putStrLn $ show $ pretty oe
