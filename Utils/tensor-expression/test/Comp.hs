@@ -67,27 +67,27 @@ insert_ce n s e = runStateT (go replace e) 0
                   (C.DimWrap d1, C.DimWrap d2)
                     | Just (D1 a)   <- cast d1
                     , Just (D1 b)   <- cast d2 -> do x <- gen2 (D2 a b)
-                                                     return $ C.mk_hash (C.attrDim e) $ C.Bin C.MV x s
+                                                     return $ C.mkExprHashed (C.attrDim e) $ C.Bin C.MV x s
                     | Just (D1 a)   <- cast d1
                     , Just (D2 b c) <- cast d2 -> do x <- gen1 (D1 b)
                                                      y <- gen2 (D2 c a)
-                                                     z <- return $ C.mk_hash (C.DimWrap (D1 c)) $ C.Bin C.VM x s
-                                                     return $ C.mk_hash (C.attrDim e) $ C.Bin C.VM z y
+                                                     z <- return $ C.mkExprHashed (C.DimWrap (D1 c)) $ C.Bin C.VM x s
+                                                     return $ C.mkExprHashed (C.attrDim e) $ C.Bin C.VM z y
                     | Just (D2 a b) <- cast d1
                     , Just (D1 c)   <- cast d2 -> do x <- gen2 (D2 a c)
                                                      y <- gen1 (D1 b)
-                                                     z <- return $ C.mk_hash (C.DimWrap (D1 a)) $ C.Bin C.MV x s
-                                                     return $ C.mk_hash (C.attrDim e) $ C.Bin C.OVV z y
+                                                     z <- return $ C.mkExprHashed (C.DimWrap (D1 a)) $ C.Bin C.MV x s
+                                                     return $ C.mkExprHashed (C.attrDim e) $ C.Bin C.OVV z y
                     | Just (D2 a b) <- cast d1
                     , Just (D2 c d) <- cast d2 -> do x <- gen2 (D2 b d)
                                                      y <- gen2 (D2 a c)
-                                                     z <- return $ C.mk_hash (C.DimWrap (D2 b c)) $ C.Bin C.MTM s x
-                                                     return $ C.mk_hash (C.attrDim e) $ C.Bin C.MTM z y
+                                                     z <- return $ C.mkExprHashed (C.DimWrap (D2 b c)) $ C.Bin C.MTM s x
+                                                     return $ C.mkExprHashed (C.attrDim e) $ C.Bin C.MTM z y
       where
         gen2 d = liftM (C.toExprHashed . fromJust) $ runGenM 2 (genExp2D d)
         gen1 d = liftM (C.toExprHashed . fromJust) $ runGenM 2 (genExp1D d)
 
-notVI :: C.ExprHashed Float -> Bool
+notVI :: Element a => C.ExprHashed a -> Bool
 notVI (_ C.:@ C.I _)   = False
 notVI (_ C.:@ C.V _)   = False
 notVI (_ C.:@ C.S _ e) = notVI e

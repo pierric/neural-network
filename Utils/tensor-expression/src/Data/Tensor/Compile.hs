@@ -3,7 +3,7 @@ module Data.Tensor.Compile(
   attr, body, attrDim, attrHash,
   toExprHashed, elimCommonExpr, qualify,
 
-  mk_hash, 
+  mkExprHashed, 
 ) where
 
 import Data.Hashable
@@ -88,15 +88,15 @@ infix 7 :>
 infix 3 :%
 
 data ExprAttr a e = a :@ ExprBody e (ExprAttr a e)
-  deriving (Eq)
+  deriving (Eq, Typeable, Data)
 data ExprBody e x = L Var x x
                   | V Var
                   | I (TensorWrap e)
                   | S e x
                   | Bin ExprOp x x
-  deriving (Eq)
+  deriving (Eq, Typeable, Data)
 data ExprOp = DM | DA | VM | MV | MTM | OVV
-  deriving (Enum, Eq)
+  deriving (Enum, Eq, Typeable, Data)
 
 attr :: ExprAttr a e -> a
 attr (a :@ _) = a
@@ -110,21 +110,21 @@ attrDim  = fst . attr
 attrHash = snd . attr
 
 toExprHashed :: (Dimension d, Element e) => U.Expr d e -> ExprHashed e
-toExprHashed e@(U.I x)     = mk_hash (DimWrap $ dim e) $ I (TensorWrap x)
-toExprHashed e@(U.S x y)   = mk_hash (DimWrap $ dim e) $ S x (toExprHashed y)
-toExprHashed e@(x U.:.* y) = mk_hash (DimWrap $ dim e) $ Bin DM  (toExprHashed x) (toExprHashed y)
-toExprHashed e@(x U.:.+ y) = mk_hash (DimWrap $ dim e) $ Bin DA  (toExprHashed x) (toExprHashed y)
-toExprHashed e@(x U.:<# y) = mk_hash (DimWrap $ dim e) $ Bin VM  (toExprHashed x) (toExprHashed y)
-toExprHashed e@(x U.:#> y) = mk_hash (DimWrap $ dim e) $ Bin MV  (toExprHashed x) (toExprHashed y)
-toExprHashed e@(x U.:%# y) = mk_hash (DimWrap $ dim e) $ Bin MTM (toExprHashed x) (toExprHashed y)
-toExprHashed e@(x U.:<> y) = mk_hash (DimWrap $ dim e) $ Bin OVV (toExprHashed x) (toExprHashed y)
+toExprHashed e@(U.I x)     = mkExprHashed (DimWrap $ dim e) $ I (TensorWrap x)
+toExprHashed e@(U.S x y)   = mkExprHashed (DimWrap $ dim e) $ S x (toExprHashed y)
+toExprHashed e@(x U.:.* y) = mkExprHashed (DimWrap $ dim e) $ Bin DM  (toExprHashed x) (toExprHashed y)
+toExprHashed e@(x U.:.+ y) = mkExprHashed (DimWrap $ dim e) $ Bin DA  (toExprHashed x) (toExprHashed y)
+toExprHashed e@(x U.:<# y) = mkExprHashed (DimWrap $ dim e) $ Bin VM  (toExprHashed x) (toExprHashed y)
+toExprHashed e@(x U.:#> y) = mkExprHashed (DimWrap $ dim e) $ Bin MV  (toExprHashed x) (toExprHashed y)
+toExprHashed e@(x U.:%# y) = mkExprHashed (DimWrap $ dim e) $ Bin MTM (toExprHashed x) (toExprHashed y)
+toExprHashed e@(x U.:<> y) = mkExprHashed (DimWrap $ dim e) $ Bin OVV (toExprHashed x) (toExprHashed y)
 
-mk_hash :: Element e => DimWrap -> ExprBody e (ExprHashed e) -> ExprHashed e
-mk_hash d b@(I t)       = (d, i_expr `hashWithSalt` t) :@ b
-mk_hash d b@(V v)       = (d, v_expr `hashWithSalt` v) :@ b
-mk_hash d b@(L v x y)   = (d, l_expr `hashWithSalt` v `hashWithSalt` attr x `hashWithSalt` attr y) :@ b
-mk_hash d b@(S e x)     = (d, s_expr `hashWithSalt` e `hashWithSalt` attr x) :@ b
-mk_hash d b@(Bin o x y) = (d, b_expr `hashWithSalt` fromEnum o `hashWithSalt` attr x `hashWithSalt` attr y) :@ b
+mkExprHashed :: Element e => DimWrap -> ExprBody e (ExprHashed e) -> ExprHashed e
+mkExprHashed d b@(I t)       = (d, i_expr `hashWithSalt` t) :@ b
+mkExprHashed d b@(V v)       = (d, v_expr `hashWithSalt` v) :@ b
+mkExprHashed d b@(L v x y)   = (d, l_expr `hashWithSalt` v `hashWithSalt` attr x `hashWithSalt` attr y) :@ b
+mkExprHashed d b@(S e x)     = (d, s_expr `hashWithSalt` e `hashWithSalt` attr x) :@ b
+mkExprHashed d b@(Bin o x y) = (d, b_expr `hashWithSalt` fromEnum o `hashWithSalt` attr x `hashWithSalt` attr y) :@ b
 
 i_expr = 0 :: Int 
 v_expr = 1 :: Int
@@ -171,7 +171,7 @@ next_po (cxt :> PBL a o x :% e) = Just $ head_po $ cxt :> PBR a o e :% x
 next_po (cxt :> PBR a o x :% e) = Just $ cxt :% a :@ Bin o x e
 
 
-newtype Var = Var VarId deriving (Show, Eq, Ord, Hashable)
+newtype Var = Var VarId deriving (Show, Eq, Ord, Hashable, Typeable, Data)
 data CodeTransState e = CodeTransState { _cts_vid :: VarId, _cts_bounds :: M.Map Var (ExprHashed e) }
 type CodeTrans e = State (CodeTransState e)
 
@@ -214,7 +214,7 @@ elimCommonExpr e = second (sortOn fst . M.toList . _cts_bounds) $ run_code_trans
     step tc@(cxt :% _ :@ I{}) = return (Nothing, tc)
     step    (cxt :% e  ) = do
       vid <- new_var
-      let v = mk_hash (attrDim e) (V vid)
+      let v = mkExprHashed (attrDim e) (V vid)
       (cxt, upd) <- runWriterT $ go cxt (subst v e)
       return $ 
         if getAny upd 
@@ -252,7 +252,7 @@ elimCommonExpr e = second (sortOn fst . M.toList . _cts_bounds) $ run_code_trans
 
 
 qualify :: Element e => ExprHashed e -> [(Var, ExprHashed e)] -> ExprHashed e
-qualify e bnds = let bind (v,e2) e1 = mk_hash (attrDim e1) $ L v e2 e1
+qualify e bnds = let bind (v,e2) e1 = mkExprHashed (attrDim e1) $ L v e2 e1
                  in foldr bind e bnds
 
 -----------------------------------------------------------------------------------------

@@ -4,10 +4,12 @@ module Main where
 import Test.Hspec
 import Test.QuickCheck hiding (scale)
 import qualified Data.Vector.Storable as PV
+import Data.Generics
 import Data.Typeable (cast)
 import Control.Monad
 import Control.Monad.Trans (liftIO)
-import Text.PrettyPrint.Free (Pretty(..))
+import Text.PrettyPrint.Free (Pretty(..), hsep, text)
+import Text.Printf (printf)
 import Data.Tensor
 import Data.Tensor.Compile (ExprHashed, DimWrap(..), TensorWrap(..), attrDim)
 import Comp
@@ -187,7 +189,7 @@ main = hspec $ do
       eq t1 t2
   describe "CSE" $ do
     it "substitutes one common sub-expr" $ do
-      forAll (arbitrary `suchThat` notVI) $ \e -> ioProperty $ do
+      forAll (arbitrary `suchThat` notVI) $ \(e :: ExprHashed Double) -> ioProperty $ do
         s  <- generate (resize 3 arbitrary)
         (e1, rc) <- insert_ce 2 s e
         let e2 = fst $ elimCommonExpr e1
@@ -197,17 +199,32 @@ main = hspec $ do
                      && and (map (== head vs) (tail vs))  -- all subst'd var  are the same
                      && and (map (== s) ss)               -- all subst'd expr are the same
     it "preserve value" $ do
-      forAll (arbitrary `suchThat` notVI) $ \e -> ioProperty $ do
+      forAll (arbitrary `suchThat` notVI) $ \(e :: ExprHashed Float) -> ioProperty $ do
         s  <- generate (resize 3 arbitrary)
         (e1, rc) <- insert_ce 2 s e
         let e2 = uncurry qualify $ elimCommonExpr e1
-        putStrLn $ show $ pretty e2
-        t1 <- evalExprHashed e1
-        t2 <- evalExprHashed e2
-        case (t1, t2) of 
-          (TensorWrap t1, TensorWrap t2) 
-            | Just t2 <- cast t2 -> eq t1 t2
-            | otherwise          -> return $ property False
+        return $ whenFail (out e1 e2) $ ioProperty $ do
+          t1 <- evalExprHashed e1
+          t2 <- evalExprHashed e2
+          case (t1, t2) of 
+            (TensorWrap t1, TensorWrap t2) 
+              | Just t2 <- cast t2 -> eq t1 t2
+              | otherwise          -> return $ property False
+
+out :: ExprHashed Float -> ExprHashed Float -> IO ()
+out e1 e2 = do
+  putStrLn $ show $ pretty e1
+  putStrLn $ show $ pretty e2
+  mapM_ prTensor (tensors e1)
+  where
+    tensors :: Data a => a -> [TensorWrap Float]
+    tensors = everything (++) ([] `mkQ` isTensorWrap)
+    isTensorWrap a@(TensorWrap{}) = [a]
+
+    prTensor (TensorWrap t) = do
+      d <- PV.unsafeFreeze (_tdat t)
+      let pp = hsep $ map (text . printf "%.1e") (PV.toList d)
+      putStrLn $ show pp
 
 isclose a b
   | a == b       = True
