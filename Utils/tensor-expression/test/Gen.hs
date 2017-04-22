@@ -12,6 +12,14 @@ import System.IO.Unsafe (unsafePerformIO)
 import Data.Tensor
 import qualified Data.Tensor.Compile as C
 
+
+mkZ :: Dimension d => d -> IO (Tensor d Double)
+mkZ = newTensor
+
+mkV :: Dimension d => d -> Gen (PV.Vector Double)
+mkV d = let sf = fromIntegral <$> (arbitrary :: Gen Int)
+        in PV.fromList <$> vectorOf (size d) sf
+
 esize :: Expr d a -> Int
 esize (I _)   = 1
 esize (S _ _) = 1
@@ -107,7 +115,7 @@ genSmallDimension :: Gen Int
 genSmallDimension = getPositive <$> resize 40 arbitrary
 
 genSmallFraction :: (Fractional a, Arbitrary a) => Gen a
-genSmallFraction  = resize 5 arbitrary
+genSmallFraction  = resize 25 arbitrary
 
 instance (Arbitrary a, Element a) => Arbitrary (C.ExprHashed a) where
   arbitrary = oneof [genE1, genE2]

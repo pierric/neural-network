@@ -112,7 +112,7 @@ type CG = StateT CGState (ExceptT CGError IO)
 data CGError = CGSizeMismatchedTensors
              | CGMismatchedDimension String String String
              | CGMismatchedElementType
-             | CGReferenceUnknown 
+             | CGReferenceUnknown String
              | CGReferenceAlreadyBound
   deriving (Eq, Show)
 data CGState = CGS { _cgs_let :: M.Map E.Var VarAny
@@ -154,7 +154,7 @@ toStatements (_ E.:@ E.L v e1 e2) = do
 toStatements (_ E.:@ E.V v) = do
   mb <- lookup_let v
   case mb of 
-    Nothing -> throwError CGReferenceUnknown
+    Nothing -> throwError $ CGReferenceUnknown (show v)
     Just (VarAny v) -> 
       case cast v of
         Just v -> return ([], v)

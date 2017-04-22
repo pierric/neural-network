@@ -7,6 +7,7 @@ import qualified Data.Vector.Storable as PV
 import Data.Typeable (cast)
 import Control.Monad
 import Control.Monad.Trans (liftIO)
+import Text.PrettyPrint.Free (Pretty(..))
 import Data.Tensor
 import Data.Tensor.Compile (ExprHashed, DimWrap(..), TensorWrap(..), attrDim)
 import Comp
@@ -18,31 +19,6 @@ import Gen
 --
 -- stack build tensor-expression --test --test-arguments --qc-max-size=25
 --
-
-mkZ :: Dimension d => d -> IO (Tensor d Float)
-mkZ = newTensor
-
-mkV :: Dimension d => d -> Gen (PV.Vector Float)
-mkV d = let sf = fromIntegral <$> (arbitrary :: Gen Int)
-        in PV.fromList <$> vectorOf (size d) sf
-
-isclose a b
-  | a == b       = True
-  | isInfinite a = False
-  | isInfinite b = False
-  | otherwise    = let diff = abs (a-b)
-                       rel  = 0.0001
-                   in diff <= abs (rel * a) || diff <= abs (rel * b)
-
-
-eq :: (Dimension d, Element a, RealFloat a) => Tensor d a -> Tensor d a -> IO Property
-eq t1 t2 = do
-  d1 <- PV.unsafeFreeze (_tdat t1)
-  d2 <- PV.unsafeFreeze (_tdat t2)
-  let cc = PV.zipWith isclose d1 d2
-      pr = do putStrLn $ show d1
-              putStrLn $ show d2
-  return $ whenFail pr $ _tdim t1 == _tdim t2 && PV.and cc
 
 main = hspec $ do
   describe "vec + vec" $ do
@@ -201,11 +177,11 @@ main = hspec $ do
             t3 <- packTensor d $ hm2v (scale f $ v2hm d v1)
             eq t2 t3
   describe "optimization" $ do
-    it "opt'ed 1D Expr computes right" $ property $ \ (e :: Expr D1 Float) -> ioProperty $ do
+    it "opt'ed 1D Expr computes right" $ property $ \ (e :: Expr D1 Double) -> ioProperty $ do
       t1 <- eval' e
       t2 <- eval  e
       eq t1 t2
-    it "opt'ed 2D Expr computes right" $ property $ \ (e :: Expr D2 Float) -> ioProperty $ do
+    it "opt'ed 2D Expr computes right" $ property $ \ (e :: Expr D2 Double) -> ioProperty $ do
       t1 <- eval' e
       t2 <- eval  e
       eq t1 t2
@@ -225,12 +201,31 @@ main = hspec $ do
         s  <- generate (resize 3 arbitrary)
         (e1, rc) <- insert_ce 2 s e
         let e2 = uncurry qualify $ elimCommonExpr e1
+        putStrLn $ show $ pretty e2
         t1 <- evalExprHashed e1
         t2 <- evalExprHashed e2
         case (t1, t2) of 
           (TensorWrap t1, TensorWrap t2) 
             | Just t2 <- cast t2 -> eq t1 t2
             | otherwise          -> return $ property False
+
+isclose a b
+  | a == b       = True
+  | isInfinite a = False
+  | isInfinite b = False
+  | otherwise    = let diff = abs (a-b)
+                       rel  = 0.0001
+                   in diff <= abs (rel * a) || diff <= abs (rel * b)
+
+
+eq :: (Dimension d, Element a, RealFloat a) => Tensor d a -> Tensor d a -> IO Property
+eq t1 t2 = do
+  d1 <- PV.unsafeFreeze (_tdat t1)
+  d2 <- PV.unsafeFreeze (_tdat t2)
+  let cc = PV.zipWith isclose d1 d2
+      pr = do putStrLn $ show d1
+              putStrLn $ show d2
+  return $ whenFail pr $ _tdim t1 == _tdim t2 && PV.and cc
 
 evalExprHashed :: Element e => ExprHashed e -> IO (TensorWrap e)
 evalExprHashed e = do

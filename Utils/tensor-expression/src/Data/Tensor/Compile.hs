@@ -8,6 +8,7 @@ module Data.Tensor.Compile(
 
 import Data.Hashable
 import qualified Data.Map as M
+import Data.List (sortOn, foldr)
 import Data.Bifunctor (second)
 import Data.Data
 import Text.Printf
@@ -193,7 +194,7 @@ bind_var (vid, expr) = do
       modify (\s -> s{_cts_bounds = M.insert vid expr bnds})
 
 elimCommonExpr :: Element e => ExprHashed e -> (ExprHashed e, [(Var, ExprHashed e)])
-elimCommonExpr e = second (M.toList . _cts_bounds) $ run_code_trans $ do
+elimCommonExpr e = second (sortOn fst . M.toList . _cts_bounds) $ run_code_trans $ do
   Nil :% e <- repeat_step (head_po $ Nil :% e)
   return e
   where
@@ -251,19 +252,22 @@ elimCommonExpr e = second (M.toList . _cts_bounds) $ run_code_trans $ do
 
 
 qualify :: Element e => ExprHashed e -> [(Var, ExprHashed e)] -> ExprHashed e
-qualify e [] = e
-qualify e ((v,e'):bnds) = mk_hash (attrDim e) $ L v e' e
+qualify e bnds = let bind (v,e2) e1 = mk_hash (attrDim e1) $ L v e2 e1
+                 in foldr bind e bnds
 
 -----------------------------------------------------------------------------------------
 
 instance Pretty DimWrap where
   pretty (DimWrap d) = pretty d
 
+instance Pretty Var where
+  pretty (Var n) = text "V" <+> pretty n
+
 instance (Pretty e, V.Storable e, Show e) => Pretty (ExprHashed e) where
-  pretty (a :@ (L v x y))   = hang 4 $ (pretty (fst a) <+> text "L")
+  pretty (a :@ (L v x y))   = hang 4 $ (pretty (fst a) <+> text "L" <+> pretty v)
                                 `above` pretty x
                                 `above` pretty y
-  pretty (a :@ (V v))       = hang 4 $ (pretty (fst a) <+> text "V")
+  pretty (a :@ (V v))       = hang 4 $ (pretty (fst a) <+> pretty v)
   pretty (a :@ (I i))       = hang 4 $ (pretty (fst a) <+> text "I")
                                 `above` text (show i)
   pretty (a :@ (S f x))     = hang 4 $ (pretty (fst a) <+> text "S")

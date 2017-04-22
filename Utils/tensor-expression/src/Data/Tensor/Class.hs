@@ -45,6 +45,7 @@ instance Dimension D3 where
 class (Show a, Num a, Eq a, Data a, V.Storable a, Hashable a, SIMDable a, Numeric a) => Element a
 
 instance Element Float
+instance Element Double
 
 data Tensor d a = Tensor {
   _tdim :: d,
