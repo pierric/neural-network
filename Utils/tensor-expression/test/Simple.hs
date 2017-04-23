@@ -8,7 +8,7 @@ import Data.Generics
 import Data.Typeable (cast)
 import Control.Monad
 import Control.Monad.Trans (liftIO)
-import Text.PrettyPrint.Free (Pretty(..), hsep, text)
+import Text.PrettyPrint.Free (Pretty(..), encloseSep, lbracket, rbracket, comma, text, renderPretty, displayS)
 import Text.Printf (printf)
 import Data.Tensor
 import Data.Tensor.Compile (ExprHashed, DimWrap(..), TensorWrap(..), attrDim)
@@ -214,8 +214,11 @@ main = hspec $ do
 out :: ExprHashed Float -> ExprHashed Float -> IO ()
 out e1 e2 = do
   putStrLn $ show $ pretty e1
-  putStrLn $ show $ pretty e2
+  (st, _) <- handleE $ runCG initCG $ do
+    (st, _) <- toStatements e1
+    return st
   mapM_ prTensor (tensors e1)
+  mapM_ prStatment st
   where
     tensors :: Data a => a -> [TensorWrap Float]
     tensors = everything (++) ([] `mkQ` isTensorWrap)
@@ -223,8 +226,12 @@ out e1 e2 = do
 
     prTensor (TensorWrap t) = do
       d <- PV.unsafeFreeze (_tdat t)
-      let pp = hsep $ map (text . printf "%.1e") (PV.toList d)
-      putStrLn $ show pp
+      let pp = encloseSep lbracket rbracket comma $ map (text . printf "%.1e") (PV.toList d)
+      putStrLn $ show t
+      putStrLn $ displayS (renderPretty 0.4 100000 pp) ""
+
+    prStatment :: Statement Float -> IO ()
+    prStatment st = print $ pretty st
 
 isclose a b
   | a == b       = True
@@ -253,5 +260,5 @@ evalExprHashed e = do
         (st, v) <- toStatements e
         liftIO $ execute $ st ++ [Store v (TensorWrap t)]
       return (TensorWrap t)
-  where
-    handleE act = act >>= either (ioError . userError . show) return
+
+handleE act = act >>= either (ioError . userError . show) return
