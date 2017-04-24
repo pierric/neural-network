@@ -1,28 +1,31 @@
-resolver: lts-7.14
+resolver: lts-8.11
 packages:
 - 'Base'
-- 'Backend-blashs'
-- 'Backend-blashs/Example/MNIST'
-- 'Backend-blashs/Example/imdb'
-- 'Backend-hmatrix'
+- 'Utils/tensor-expression'
+# - 'Backend-blashs'
+# - 'Backend-blashs/Example/MNIST'
+# - 'Backend-blashs/Example/imdb'
+# - 'Backend-hmatrix'
 #- 'Backend-hmatrix/Example/MNIST'
 extra-deps:
 - blas-hs-0.1.1.0
 - hmatrix-0.18.0.0
-- tokenize-0.3.0
+# - tokenize-0.3.0
 flags:
   blas-hs:
     openblas: true
-  neural-network-blashs:
-    vec128: true
   hmatrix:
     openblas: true
+  # neural-network-blashs:
+    # vec128: true
+  tensor-expression:
+    vec128: true
 
 extra-package-dbs: []
 
 arch: x86_64
 extra-include-dirs:
--
+- 
 extra-lib-dirs:
 - 
 ghc-options:
