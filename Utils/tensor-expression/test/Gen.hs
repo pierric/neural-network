@@ -114,8 +114,12 @@ genTensor d = do vec <- PV.fromList <$> vectorOf (size d) genSmallFraction
 genSmallDimension :: Gen Int
 genSmallDimension = getPositive <$> resize 40 arbitrary
 
+-- a Float bigger than 10 might easily cause overflow (> 10^4) when testing 
+-- against a expression with 6 or 7 BLAS-op's.
+-- so we generate a value with a small size 2, which means the expectation 
+-- of generated values is 2.
 genSmallFraction :: (Fractional a, Arbitrary a) => Gen a
-genSmallFraction  = resize 25 arbitrary
+genSmallFraction  = resize 2 arbitrary
 
 instance (Arbitrary a, Element a) => Arbitrary (C.ExprHashed a) where
   arbitrary = oneof [genE1, genE2]

@@ -199,39 +199,67 @@ main = hspec $ do
                      && and (map (== head vs) (tail vs))  -- all subst'd var  are the same
                      && and (map (== s) ss)               -- all subst'd expr are the same
     it "preserve value" $ do
-      forAll (arbitrary `suchThat` notVI) $ \(e :: ExprHashed Float) -> ioProperty $ do
+      forAll (arbitrary `suchThat` notVI) $ \(e :: ExprHashed Double) -> ioProperty $ do
         s  <- generate (resize 3 arbitrary)
         (e1, rc) <- insert_ce 2 s e
         let e2 = uncurry qualify $ elimCommonExpr e1
-        return $ whenFail (out e1 e2) $ ioProperty $ do
-          t1 <- evalExprHashed e1
-          t2 <- evalExprHashed e2
-          case (t1, t2) of 
-            (TensorWrap t1, TensorWrap t2) 
-              | Just t2 <- cast t2 -> eq t1 t2
-              | otherwise          -> return $ property False
+        t1 <- evalExprHashed e1
+        t2 <- evalExprHashed e2
+        case (t1, t2) of 
+          (TensorWrap t1, TensorWrap t2) 
+            | Just t2 <- cast t2 -> eq t1 t2
+            | otherwise          -> return $ property False
 
-out :: ExprHashed Float -> ExprHashed Float -> IO ()
-out e1 e2 = do
-  putStrLn $ show $ pretty e1
-  (st, _) <- handleE $ runCG initCG $ do
-    (st, _) <- toStatements e1
-    return st
-  mapM_ prTensor (tensors e1)
-  mapM_ prStatment st
-  where
-    tensors :: Data a => a -> [TensorWrap Float]
-    tensors = everything (++) ([] `mkQ` isTensorWrap)
-    isTensorWrap a@(TensorWrap{}) = [a]
+-- out :: ExprHashed Float -> ExprHashed Float -> IO ()
+-- out e1 e2 = do
+--   putStrLn $ show $ pretty e1
 
-    prTensor (TensorWrap t) = do
-      d <- PV.unsafeFreeze (_tdat t)
-      let pp = encloseSep lbracket rbracket comma $ map (text . printf "%.1e") (PV.toList d)
-      putStrLn $ show t
-      putStrLn $ displayS (renderPretty 0.4 100000 pp) ""
+--   ((st, v), _) <- handleE $ runCG initCG $ toStatements e1
+--   let tss = tensors e1
+--   mapM_ prTensor tss
+--   mapM_ prStatment st
 
-    prStatment :: Statement Float -> IO ()
-    prStatment st = print $ pretty st
+--   putStrLn "----------"
+--   putStrLn "Store the tensors"
+--   forM_ (zip [1..] tss) $ \(i, TensorWrap t) -> do
+--     putStrLn $ show t
+--     let tfn = "t" ++ show i
+--     putStrLn $ "save as " ++ tfn
+--     d <- PV.unsafeFreeze (_tdat t)
+--     BS.writeFile tfn $ encode d
+
+--   putStrLn "----------"
+--   putStrLn $ "target var:" ++ show v
+
+--   putStrLn "----------"
+--   putStrLn "Re-calc the expr"
+--   t1 <- evalExprHashed e1
+--   prTensor t1
+
+--   putStrLn "----------"
+--   putStrLn "Re-calc the compiled statements"
+--   case attrDim e1 of
+--     DimWrap d -> do
+--       tt  <- newTensor d
+--       exs <- execute' (st ++ [Store v (TensorWrap tt)])
+--       prTensor (TensorWrap tt)
+--       forM_ (sortOn fst $ M.toList exs) $ \(i,t) -> do
+--         putStrLn $ "Var " ++ show i
+--         prTensor t
+  
+--   where
+--     tensors :: Data a => a -> [TensorWrap Float]
+--     tensors = everything (++) ([] `mkQ` isTensorWrap)
+--     isTensorWrap a@(TensorWrap{}) = [a]
+
+--     prTensor (TensorWrap t) = do
+--       d <- PV.unsafeFreeze (_tdat t)
+--       let pp = encloseSep lbracket rbracket comma $ map (text . printf "%.8e") (PV.toList d)
+--       putStrLn $ show t
+--       putStrLn $ displayS (renderPretty 0.4 100000 pp) ""
+
+--     prStatment :: Statement Float -> IO ()
+--     prStatment st = print $ pretty st
 
 isclose a b
   | a == b       = True
