@@ -30,7 +30,7 @@ main = hspec $ do
         \v -> ioProperty $ do
           zr <- mkZ d
           t1 <- packTensor d v
-          t2 <- eval' $ I zr :.+ I t1
+          t2 <- evalNoOpt $ I zr :.+ I t1
           eq t1 t2
     it "vec1 + zero = vec1" $ do
       let d = D1 5
@@ -38,7 +38,7 @@ main = hspec $ do
         \v -> ioProperty $ do
           zr <- mkZ d
           t1 <- packTensor d v
-          t2 <- eval' $ I t1 :.+ I zr
+          t2 <- evalNoOpt $ I t1 :.+ I zr
           eq t1 t2
     it "vec1 + vec2 = vec3" $ do
       let d = D1 7
@@ -47,7 +47,7 @@ main = hspec $ do
           t1 <- packTensor d v1
           t2 <- packTensor d v2
           t3 <- packTensor d $ PV.zipWith (+) v1 v2
-          t4 <- eval' $ I t1 :.+ I t2
+          t4 <- evalNoOpt $ I t1 :.+ I t2
           eq t3 t4
   describe "vec * vec" $ do
     it "zero * vec1 = zero" $ do
@@ -56,7 +56,7 @@ main = hspec $ do
         \v -> ioProperty $ do
           zr <- mkZ d
           t1 <- packTensor d v
-          t2 <- eval' $ I zr :.* I t1
+          t2 <- evalNoOpt $ I zr :.* I t1
           eq zr t2
     it "vec1 * zero = zero" $ do
       let d = D1 3
@@ -64,7 +64,7 @@ main = hspec $ do
         \v -> ioProperty $ do
           zr <- mkZ d
           t1 <- I <$> packTensor d v
-          t2 <- eval' $ I zr :.* t1
+          t2 <- evalNoOpt $ I zr :.* t1
           eq zr t2
     it "vec1 * vec2 = vec3" $ do
       let d = D1 7
@@ -73,7 +73,7 @@ main = hspec $ do
           t1 <- packTensor d v1
           t2 <- packTensor d v2
           t3 <- packTensor d $ PV.zipWith (*) v1 v2
-          t4 <- eval' $ I t1 :.* I t2
+          t4 <- evalNoOpt $ I t1 :.* I t2
           eq t3 t4
   describe "vec * matrix" $ do
     it "vec1 * ident = vec1" $ do
@@ -82,7 +82,7 @@ main = hspec $ do
         \v1 -> ioProperty $ do
           t1 <- packTensor (D1 s) v1
           t2 <- packTensor (D2 s s) $ hm2v (ident s)
-          t3 <- eval' $ I t1 :<# I t2
+          t3 <- evalNoOpt $ I t1 :<# I t2
           eq t3 t1
     it "vec1 * matrix = vec2" $ do
       let d1 = D1 2
@@ -93,7 +93,7 @@ main = hspec $ do
           t1 <- packTensor d1 v1
           t2 <- packTensor d2 v2
           t3 <- packTensor d3 $ hv2v (v2hv d1 v1 <# v2hm d2 v2)
-          t4 <- eval' $ I t1 :<# I t2
+          t4 <- evalNoOpt $ I t1 :<# I t2
           eq t3 t4
   describe "matrix * vec" $ do
     it "ident * vec1 = vec1" $ do
@@ -102,7 +102,7 @@ main = hspec $ do
         \v1 -> ioProperty $ do
           t1 <- packTensor (D2 s s) $ hm2v (ident s)
           t2 <- packTensor (D1 s) v1
-          t3 <- eval' $ I t1 :#> I t2
+          t3 <- evalNoOpt $ I t1 :#> I t2
           eq t2 t3
     it "matrix * vec1 = vec2" $ do
       let d1 = D2 6 2
@@ -113,7 +113,7 @@ main = hspec $ do
           t1 <- packTensor d1 v1
           t2 <- packTensor d2 v2
           t3 <- packTensor d3 $ hv2v (v2hm d1 v1 #> v2hv d2 v2)
-          t4 <- eval' $ I t1 :#> I t2
+          t4 <- evalNoOpt $ I t1 :#> I t2
           eq t3 t4
   describe "matrix * matrix" $ do
     it "ident %# matrix1 = matrix1" $ do
@@ -122,7 +122,7 @@ main = hspec $ do
         \v1 -> ioProperty $ do
           t1 <- packTensor (D2 s s) $ hm2v (ident s)
           t2 <- packTensor (D2 s s) v1
-          t3 <- eval' $ I t1 :%# I t2
+          t3 <- evalNoOpt $ I t1 :%# I t2
           eq t2 t3
     it "matrix1 %# ident = matrix1^T" $ do
       let s = 8
@@ -132,7 +132,7 @@ main = hspec $ do
           t1 <- packTensor d v1
           t2 <- packTensor d $ hm2v (ident s)
           t3 <- packTensor d $ hm2v (tr' $ v2hm d v1)
-          t4 <- eval' $ I t1 :%# I t2
+          t4 <- evalNoOpt $ I t1 :%# I t2
           eq t3 t4
     it "matrix1 %# matrix2 = matrix3" $ do
       let d1 = D2 8 5
@@ -143,7 +143,7 @@ main = hspec $ do
           t1 <- packTensor d1 v1
           t2 <- packTensor d2 v2
           t3 <- packTensor d3 $ hm2v (v2hm d2 v2 <> tr' (v2hm d1 v1))
-          t4 <- eval' $ I t1 :%# I t2
+          t4 <- evalNoOpt $ I t1 :%# I t2
           eq t3 t4
   describe "cross product" $ do
     it "vec1 <> vec2" $ do
@@ -154,7 +154,7 @@ main = hspec $ do
         \(v1, v2) -> ioProperty $ do
           t1 <- packTensor d1 v1
           t2 <- packTensor d2 v2
-          t3 <- eval' $ I t1 :<> I t2
+          t3 <- evalNoOpt $ I t1 :<> I t2
           t4 <- packTensor d3 $ hm2v (v2hv d1 v1 `outer` (v2hv d2 v2))
           eq t3 t4
   describe "scaling" $ do
@@ -165,7 +165,7 @@ main = hspec $ do
           ioProperty $ do
             let f = fromIntegral s / 100
             t1 <- packTensor d v1
-            t2 <- eval' $ S f (I t1)
+            t2 <- evalNoOpt $ S f (I t1)
             t3 <- packTensor d $ hv2v (scale f $ v2hv d v1)
             eq t2 t3
     it "scale matrix" $ do
@@ -175,16 +175,16 @@ main = hspec $ do
           ioProperty $ do
             let f = fromIntegral s / 100
             t1 <- packTensor d v1
-            t2 <- eval' $ S f (I t1)
+            t2 <- evalNoOpt $ S f (I t1)
             t3 <- packTensor d $ hm2v (scale f $ v2hm d v1)
             eq t2 t3
   describe "optimization" $ do
     it "opt'ed 1D Expr computes right" $ property $ \ (e :: Expr D1 Double) -> ioProperty $ do
-      t1 <- eval' e
+      t1 <- evalNoOpt e
       t2 <- eval  e
       eq t1 t2
     it "opt'ed 2D Expr computes right" $ property $ \ (e :: Expr D2 Double) -> ioProperty $ do
-      t1 <- eval' e
+      t1 <- evalNoOpt e
       t2 <- eval  e
       eq t1 t2
   describe "CSE" $ do
@@ -202,7 +202,7 @@ main = hspec $ do
       forAll (arbitrary `suchThat` notVI) $ \(e :: ExprHashed Double) -> ioProperty $ do
         s  <- generate (resize 3 arbitrary)
         (e1, rc) <- insert_ce 2 s e
-        let e2 = uncurry qualify $ elimCommonExpr e1
+        let e2 = close $ elimCommonExpr e1
         t1 <- evalExprHashed e1
         t2 <- evalExprHashed e2
         case (t1, t2) of 

@@ -3,8 +3,10 @@ module Data.Tensor(
   D1(..), D2(..), D3(..),
   newTensor, packTensor, copyTensor, eqTensor,
   Expr(..), dim, Statement(..),
-  toExprHashed, elimCommonExpr, qualify, toStatements, optimize, CGState, runCG, initCG, execute,
-  compile, eval, eval',
+  toExprHashed, elimCommonExpr, close, toStatements, 
+  CGState, runCG, initCG, 
+  compile, compileAndStore, optimize, execute, 
+  eval, evalNoOpt,
 ) where
 
 import Data.Tensor.Class
@@ -16,10 +18,10 @@ import Control.Monad.State (runStateT)
 import Control.Monad.Trans (liftIO)
 
 compile :: (Dimension d, Element a) => Expr d a -> CG ([Statement a], Var a)
-compile = toStatements . uncurry qualify . elimCommonExpr . toExprHashed
+compile = toStatements . close . elimCommonExpr . toExprHashed
 
-compileAndSave :: (Dimension d, Element a) => Expr d a -> Tensor d a -> CG ([Statement a])
-compileAndSave e t = do 
+compileAndStore :: (Dimension d, Element a) => Expr d a -> Tensor d a -> CG ([Statement a])
+compileAndStore e t = do 
   (st, v) <- compile e
   return (st ++ [Store v (TensorWrap t)])
 
@@ -28,16 +30,16 @@ eval :: (Dimension d, Element a) => Expr d a -> IO (Tensor d a)
 eval expr = do
   t <- newTensor (dim expr)
   handleE $ runCG initCG $ do
-    st <- compileAndSave expr t
+    st <- compileAndStore expr t
     st <- optimize st
     liftIO $ execute st
   return t
 
-eval' :: (Dimension d, Element a) => Expr d a -> IO (Tensor d a)
-eval' expr = do
+evalNoOpt :: (Dimension d, Element a) => Expr d a -> IO (Tensor d a)
+evalNoOpt expr = do
   t <- newTensor (dim expr)
   handleE $ runCG initCG $ do
-     st <- compileAndSave expr t
+     st <- compileAndStore expr t
      liftIO $ execute st
   return t
 

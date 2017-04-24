@@ -1,7 +1,7 @@
 module Data.Tensor.Compile(
   Var(..), TensorWrap(..), DimWrap(..), ExprAttr(..), ExprBody(..), ExprOp(..), ExprHashed,
   attr, body, attrDim, attrHash,
-  toExprHashed, elimCommonExpr, qualify,
+  toExprHashed, elimCommonExpr, close,
 
   mkExprHashed, 
 ) where
@@ -251,9 +251,9 @@ elimCommonExpr e = second (sortOn fst . M.toList . _cts_bounds) $ run_code_trans
                         _              -> return b
 
 
-qualify :: Element e => ExprHashed e -> [(Var, ExprHashed e)] -> ExprHashed e
-qualify e bnds = let bind (v,e2) e1 = mkExprHashed (attrDim e1) $ L v e2 e1
-                 in foldr bind e bnds
+close :: Element e => (ExprHashed e, [(Var, ExprHashed e)]) -> ExprHashed e
+close (e, bnds) = let bind (v,e2) e1 = mkExprHashed (attrDim e1) $ L v e2 e1
+                  in foldr bind e bnds
 
 -----------------------------------------------------------------------------------------
 
