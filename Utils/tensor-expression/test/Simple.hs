@@ -12,6 +12,7 @@ import Text.PrettyPrint.Free (Pretty(..), encloseSep, lbracket, rbracket, comma,
 import Text.Printf (printf)
 import Data.Tensor
 import Data.Tensor.Compile (ExprHashed, DimWrap(..), TensorWrap(..), attrDim)
+import Data.Tensor.Execute (Statement(..))
 import Comp
 import Hmatrix
 import Gen
