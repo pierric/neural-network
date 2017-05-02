@@ -42,6 +42,15 @@ instance Dimension D2 where
 instance Dimension D3 where
   size (D3 a b c) = a * b * c
 
+instance Hashable D1 where
+  hashWithSalt s (D1 a) = s `hashWithSalt` a
+
+instance Hashable D2 where
+  hashWithSalt s (D2 a b) = s `hashWithSalt` a `hashWithSalt` b
+
+instance Hashable D3 where
+  hashWithSalt s (D3 a b c) = s `hashWithSalt` a `hashWithSalt` b `hashWithSalt` c
+
 class (Show a, Num a, Eq a, Data a, V.Storable a, Hashable a, SIMDable a, Numeric a) => Element a
 
 instance Element Float
@@ -51,6 +60,14 @@ data Tensor d a = Tensor {
   _tdim :: d,
   _tdat :: (V.IOVector a)
 }
+
+instance (Show d, Show a) => Show (Tensor d a) where
+  show (Tensor d (V.MVector o v)) = printf "<tensor (%-8s): %s + %4d>" (show d) (show v) o
+
+deriving instance (Data d, Data a) => Data (Tensor d a)
+
+instance (Hashable d, Hashable a, V.Storable a) => Hashable (Tensor d a) where
+  hashWithSalt s (Tensor d v) = s `hashWithSalt` d `hashWithSalt` (unsafeDupablePerformIO $ V.unsafeWith v return)
 
 newTensor :: (Dimension d, Element a) => d -> IO (Tensor d a)
 newTensor d = Tensor d <$> V.new (size d)
@@ -70,7 +87,7 @@ eqTensor (Tensor d1 (V.MVector o1 p1)) (Tensor d2 (V.MVector o2 p2)) =
 data Expr d a where
   I :: Tensor d a -> Expr d a
   S :: a -> Expr d a -> Expr d a
-  -- A :: (a -> a) -> Expr d a -> Expr d a
+  -- Tr :: Expr D2 a -> Expr D2 a
   (:.*) :: Expr d a -> Expr d a -> Expr d a
   (:.+) :: Expr d a -> Expr d a -> Expr d a
   (:<#) :: Expr D1 a -> Expr D2 a -> Expr D1 a
@@ -78,9 +95,12 @@ data Expr d a where
   (:%#) :: Expr D2 a -> Expr D2 a -> Expr D2 a
   (:<>) :: Expr D1 a -> Expr D1 a -> Expr D2 a
 
+deriving instance (Show d, Show a) => Show (Expr d a)
+
 dim :: Expr d a -> d
 dim (I t)     = _tdim t
 dim (S _ a)   = dim a
+-- dim (Tr e)    = case dim e of D2 x y -> D2 y x
 dim (a :.* b) = dim a
 dim (a :.+ b) = dim b
 dim (a :<# b) = let D2 _ c = dim b in D1 c
@@ -88,24 +108,7 @@ dim (a :#> b) = let D2 r _ = dim a in D1 r
 dim (a :%# b) = let (D2 r1 _, D2 r2 _) = (dim a, dim b) in D2 r2 r1
 dim (a :<> b) = let (D1 r, D1 c) = (dim a, dim b) in D2 r c
 
-instance (Show d, Show a) => Show (Tensor d a) where
-  show (Tensor d (V.MVector o v)) = printf "<tensor (%-8s): %s + %4d>" (show d) (show v) o
-
-deriving instance (Show d, Show a) => Show (Expr d a)
-
 type VarId = Int
-
-instance Hashable D1 where
-  hashWithSalt s (D1 a) = s `hashWithSalt` a
-
-instance Hashable D2 where
-  hashWithSalt s (D2 a b) = s `hashWithSalt` a `hashWithSalt` b
-
-instance Hashable D3 where
-  hashWithSalt s (D3 a b c) = s `hashWithSalt` a `hashWithSalt` b `hashWithSalt` c
-
-instance (Hashable d, Hashable a, V.Storable a) => Hashable (Tensor d a) where
-  hashWithSalt s (Tensor d v) = s `hashWithSalt` d `hashWithSalt` (unsafeDupablePerformIO $ V.unsafeWith v return)
 
 instance Data a => Data (V.IOVector a) where
     gfoldl k z (V.MVector a b) = z V.MVector `k` a `k` b
@@ -117,4 +120,3 @@ instance Data a => Data (V.IOVector a) where
 con_MVector = mkConstr ty_MVector "MVector" ["i","p"] Prefix
 ty_MVector  = mkDataType "Data.Vector.Storable.Mutable.MVector" [con_MVector]
 
-deriving instance (Data d, Data a) => Data (Tensor d a)
