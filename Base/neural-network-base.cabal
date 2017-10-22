@@ -17,6 +17,7 @@ cabal-version:       >=1.10
 
 library
   exposed-modules:     Data.NeuralNetwork
+                       Data.NeuralNetwork.Model
                        Data.NeuralNetwork.Common
                        Data.NeuralNetwork.Stack
                        Data.NeuralNetwork.Adapter

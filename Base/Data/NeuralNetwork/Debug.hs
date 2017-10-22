@@ -28,7 +28,7 @@ type Debug a = Adapter IO a a ()
 instance BodySize (SpecDebug a) where
   bsize s (Debug _) = s
 
-instance (Pretty a, MonadIO m, MonadError ErrCode m) => BodyTrans m b (SpecDebug a) where
+instance (Pretty a) => BodyTrans b (SpecDebug a) where
   type SpecToCom b (SpecDebug a) = Debug a
   btrans b s (Debug name)= return $ Adapter to back
     where

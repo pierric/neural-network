@@ -17,7 +17,7 @@ module Data.NeuralNetwork.Common(
   LayerSize(..),
   InputLayer(..),
   BodySize(..), BodyTrans(..), EvalTrans(..),
-  ErrCode(..),
+  Err, ErrCode(..),
   SpecIn1D(..),
   SpecIn2D(..),
   SpecInStream(..),
@@ -34,6 +34,7 @@ module Data.NeuralNetwork.Common(
 
 import Control.Monad.Except (MonadError)
 import GHC.Float (double2Float, float2Double)
+import Control.Monad.Except (ExceptT, throwError)
 import Data.Data
 import Data.HVect
 
@@ -81,15 +82,17 @@ instance BodySize a => BodySize (SpecFlow a) where
   bsize (SV sz) (Flow a) = SV (bsize sz a)
   bsize (SF n sz) (Flow a) = SF n (bsize sz a)
 
+
 -- translate the body of specification
-class MonadError ErrCode m => BodyTrans m b s where
+class BodyTrans b s where
   type SpecToCom b s
-  btrans :: b -> LayerSize -> s -> m (SpecToCom b s)
+  btrans :: b -> LayerSize -> s -> Err (SpecToCom b s)
 
-class (MonadError ErrCode m) => EvalTrans m b c s where
+class EvalTrans b c s where
   type SpecToEvl b c s
-  etrans :: b -> c -> s -> m (SpecToEvl b c s)
+  etrans :: b -> c -> s -> Err (SpecToEvl b c s)
 
+type Err = ExceptT ErrCode IO
 data ErrCode = ErrMismatch
 
 {--

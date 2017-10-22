@@ -15,24 +15,11 @@ module Data.NeuralNetwork.Adapter (
   Adapter(..)
 ) where
 
-import Data.Data
-import Data.NeuralNetwork
+import Data.NeuralNetwork.Model
 
 data Adapter m i o e = Adapter (i -> m (e,o)) (e -> o -> m i)
-  deriving Typeable
 
-instance (Typeable m, Typeable i, Typeable o, Typeable e) => Data (Adapter m i o e) where
-  toConstr _ = adapterConstr
-  gfoldl f z (Adapter u v) = z (Adapter u v)
-  gunfold k z c = errorWithoutStackTrace "Data.Data.gunfold(Adapter)"
-  dataTypeOf _  = adapterDataType
-
-adapterConstr   :: Constr
-adapterConstr = mkConstr adapterDataType "Adapter" [] Prefix
-adapterDataType :: DataType
-adapterDataType = mkDataType "Data.NeuralNetwork.Adapter" [adapterConstr]
-
-instance (Monad m, Typeable m, Typeable i, Typeable o, Typeable e) => Component (Adapter m i o e) where
+instance (RunInIO m) => Component (Adapter m i o e) where
   type Run (Adapter m i o e) = m
   type Inp (Adapter m i o e) = i
   type Out (Adapter m i o e) = o

@@ -50,7 +50,7 @@ data P
 data T c
 
 -- | basic components of neural network
-data RunLayer :: * -> * -> * where
+data RunLayer p :: * -> * where
   -- | Densely connected layer
   -- input:   vector of size m
   -- output:  vector of size n
@@ -83,6 +83,8 @@ deriving instance Typeable (RunLayer p P)
 deriving instance Typeable (RunLayer p (T SinglVec))
 deriving instance Typeable (RunLayer p (T MultiMat))
 
+type instance Dty (RunLayer p t) = p
+
 instance Data p => Data (RunLayer p F) where
   toConstr (Full _ _) = fullConstr
   gfoldl f z (Full u v) = z (Full u v)
@@ -112,7 +114,6 @@ runlayerDataType = mkDataType "Data.NeuralNetwork.Backend.BLASHS.Utils.RunLayer"
                               [fullConstr, convConstr, maxpConstr, actiConstr]
 
 instance (Numeric p, RealType p, SIMDable p) => Component (RunLayer p F) where
-    type Dty (RunLayer p F) = p
     type Run (RunLayer p F) = IO
     type Inp (RunLayer p F) = DenseVector p
     type Out (RunLayer p F) = DenseVector p
@@ -134,7 +135,6 @@ instance (Numeric p, RealType p, SIMDable p) => Component (RunLayer p F) where
         return (Full w b, idelta)
 
 instance (Numeric p, RealType p, SIMDable p) => Component (RunLayer p C) where
-  type Dty (RunLayer p C) = p
   type Run (RunLayer p C) = IO
   type Inp (RunLayer p C) = V.Vector (DenseMatrix p)
   type Out (RunLayer p C) = V.Vector (DenseMatrix p)
@@ -188,7 +188,6 @@ instance (Numeric p, RealType p, SIMDable p) => Component (RunLayer p C) where
     return $ (Conv fss nb pd, ideltaV)
 
 instance (Numeric p, RealType p, SIMDable p) => Component (RunLayer p (T SinglVec)) where
-    type Dty (RunLayer p (T SinglVec)) = p
     type Run (RunLayer p (T SinglVec)) = IO
     type Inp (RunLayer p (T SinglVec)) = DenseVector p
     type Out (RunLayer p (T SinglVec)) = DenseVector p
@@ -205,7 +204,6 @@ instance (Numeric p, RealType p, SIMDable p) => Component (RunLayer p (T SinglVe
       return $ (a, idelta)
 
 instance (Numeric p, RealType p, SIMDable p) => Component (RunLayer p (T MultiMat)) where
-    type Dty (RunLayer p (T MultiMat)) = p
     type Run (RunLayer p (T MultiMat)) = IO
     type Inp (RunLayer p (T MultiMat)) = V.Vector (DenseMatrix p)
     type Out (RunLayer p (T MultiMat)) = V.Vector (DenseMatrix p)
@@ -226,7 +224,6 @@ instance (Numeric p, RealType p, SIMDable p) => Component (RunLayer p (T MultiMa
       return $ (a, idelta)
 
 instance (Numeric p, RealType p, SIMDable p) => Component (RunLayer p P) where
-  type Dty (RunLayer p P) = p
   type Run (RunLayer p P) = IO
   type Inp (RunLayer p P) = V.Vector (DenseMatrix p)
   type Out (RunLayer p P) = V.Vector (DenseMatrix p)

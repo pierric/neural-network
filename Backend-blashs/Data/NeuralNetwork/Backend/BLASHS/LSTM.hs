@@ -47,6 +47,8 @@ data LSTM p = LLSTM { parm_w_f :: MatR p, parm_w_i :: MatR p, parm_w_o :: MatR p
                     }
   deriving Typeable
 
+type instance Dty (LSTM p) = p
+
 instance Data p => Data (LSTM p) where
   toConstr a = lstmConstr
   gfoldl f z a = z (\i->a{lstm_id=i}) `f` (lstm_id a)
@@ -112,11 +114,13 @@ type LSTMstreamInfo p = Either (LSTMstreamPrev p) (LSTMstreamNext p)
 
 type LSTM_Env_Transformer p = StateT (M.Map LSTMident (LSTMstreamInfo p))
 
+instance RunInIO (LSTM_Env_Transformer p IO) where
+  run = error "...."
+
 instance (Numeric p, RealType p, SIMDable p) => Component (LSTM p) where
   -- The state is mapping from LSTM identifier to Info.
   -- So when mutiple LSTM compoents are stacked, each can
   -- access its own state.
-  type Dty (LSTM p) = p
   type Run (LSTM p) = LSTM_Env_Transformer p IO
   type Inp (LSTM p) = VecR p
   type Out (LSTM p) = VecR p
@@ -356,11 +360,12 @@ instance (Numeric p, RealType p, SIMDable p) => Component (LSTM p) where
 newtype Stream a = Stream a
   deriving (Typeable, Data)
 
+type instance Dty (Stream a) = Dty a
+
 instance (Data a, Component a,
           Inp a ~ VecR (Dty a),
           Typeable (Dty a), Numeric (Dty a), RealType (Dty a), SIMDable (Dty a),
           Run a ~ Run (LSTM (Dty a))) => Component (Stream a) where
-  type Dty (Stream a) = Dty a
   type Run (Stream a) = IO
   type Inp (Stream a) = [Inp a]
   type Out (Stream a) = [Out a]

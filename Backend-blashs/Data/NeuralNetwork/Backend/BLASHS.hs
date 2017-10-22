@@ -30,14 +30,10 @@ import Data.NeuralNetwork.Backend.BLASHS.LSTM
 import Data.NeuralNetwork.Backend.BLASHS.Utils
 import Data.NeuralNetwork.Backend.BLASHS.Eval
 import Data.NeuralNetwork.Backend.BLASHS.SIMD
-import Control.Monad.Except (ExceptT, throwError)
+import Control.Monad.Except (throwError)
 import Control.Monad.State
 import Data.Constraint (Dict(..))
 import Blas.Generic.Unsafe (Numeric)
-
--- | Compilation of the specification of a neural network is carried out in
--- the 'Err' monad, and the possible errors are characterized by 'ErrCode'.
-type Err     = ExceptT ErrCode IO
 
 -- | The backend data type
 data ByBLASHS p = ByBLASHS
@@ -52,11 +48,10 @@ type AbbrSpecToEvl p s o = SpecToEvl (ByBLASHS p) (AbbrSpecToCom p s) o
 
 -- | Neural network specified to start with 1D / 2D input
 instance (InputLayer i, RealType p,
-          BodyTrans  Err (ByBLASHS p) s,
-          EvalTrans  Err (ByBLASHS p) (AbbrSpecToCom p s) o,
-          BackendCst Err (AbbrSpecToCom p s) (AbbrSpecToEvl p s o))
+          BodyTrans  (ByBLASHS p) s,
+          EvalTrans  (ByBLASHS p) (AbbrSpecToCom p s) o,
+          ModelCst (AbbrSpecToCom p s) (AbbrSpecToEvl p s o))
        => Backend (ByBLASHS p) (i,s,o) where
-  type Env (ByBLASHS p) = Err
   type ComponentFromSpec (ByBLASHS p) (i,s,o) = AbbrSpecToCom p s
   type EvaluatorFromSpec (ByBLASHS p) (i,s,o) = AbbrSpecToEvl p s o
   compile b (i,s,o) = do c <- btrans b (isize i) s
@@ -64,51 +59,48 @@ instance (InputLayer i, RealType p,
                          return $ (c, e)
   witness _ _ = Dict
 
-instance RunInEnv IO Err where
-  run = liftIO
-
-instance (Numeric p, RealType p, SIMDable p) => BodyTrans Err (ByBLASHS p) SpecFullConnect where
+instance (Numeric p, RealType p, SIMDable p) => BodyTrans (ByBLASHS p) SpecFullConnect where
   -- 'SpecFullConnect' is translated to a two-layer component
   -- a full-connect, followed by a relu activation (1D, single channel)
-  type SpecToCom (ByBLASHS p) SpecFullConnect = Stack (RunLayer p F) (RunLayer p (T SinglVec)) CE
+  type SpecToCom (ByBLASHS p) SpecFullConnect = Stack (RunLayer p F) (RunLayer p (T SinglVec))
   btrans _ (D1 s) (FullConnect n) = do u <- lift $ newFLayer s n
                                        return $ Stack u (Activation (relu, relu'))
   btrans _ _ _ = throwError ErrMismatch
 
-instance (Numeric p, RealType p, SIMDable p) => BodyTrans Err (ByBLASHS p) SpecConvolution where
+instance (Numeric p, RealType p, SIMDable p) => BodyTrans (ByBLASHS p) SpecConvolution where
   -- 'SpecConvolution' is translated to a two-layer component
   -- a convolution, following by a relu activation (2D, multiple channels)
-  type SpecToCom (ByBLASHS p) SpecConvolution = Stack (RunLayer p C) (RunLayer p (T MultiMat)) CE
+  type SpecToCom (ByBLASHS p) SpecConvolution = Stack (RunLayer p C) (RunLayer p (T MultiMat))
   btrans _ (D2 k s t) (Convolution n f p) = do u <- lift $ newCLayer k n f p
                                                return $ Stack u (Activation (relu, relu'))
   btrans _ _ _ = throwError ErrMismatch
 
-instance (Numeric p, RealType p, SIMDable p) => BodyTrans Err (ByBLASHS p) SpecMaxPooling where
+instance (Numeric p, RealType p, SIMDable p) => BodyTrans (ByBLASHS p) SpecMaxPooling where
   -- 'MaxPooling' is translated to a max-pooling component.
   type SpecToCom (ByBLASHS p) SpecMaxPooling = RunLayer p P
   btrans _ (D2 _ _ _) (MaxPooling n) = return (MaxP n)
   btrans _ _ _ = throwError ErrMismatch
 
-instance (Numeric p, RealType p, SIMDable p) => BodyTrans Err (ByBLASHS p) SpecReshape2DAs1D where
+instance (Numeric p, RealType p, SIMDable p) => BodyTrans (ByBLASHS p) SpecReshape2DAs1D where
   -- 'SpecReshape2DAs1D' is translated to a reshaping component.
   type SpecToCom (ByBLASHS p) SpecReshape2DAs1D = Reshape2DAs1D p
   btrans _ (D2 _ _ _) _ = return as1D
   btrans _ _ _ = throwError ErrMismatch
 
-instance (Numeric p, RealType p, SIMDable p) => BodyTrans Err (ByBLASHS p) SpecLSTM where
+instance (Numeric p, RealType p, SIMDable p) => BodyTrans (ByBLASHS p) SpecLSTM where
   -- 'SpecLSTM' is translated to a LSTM component.
-  type SpecToCom (ByBLASHS p) SpecLSTM = Stack (LSTM p) (RunLayer p (T SinglVec)) (LiftRun (Run (LSTM p)) (Run (RunLayer p (T SinglVec))))
+  type SpecToCom (ByBLASHS p) SpecLSTM = Stack (LSTM p) (RunLayer p (T SinglVec))
   btrans _ (D1 s) (LSTM n) = do u <- lift $ newLSTM s n
                                 return $ Stack u (Activation (relu, relu'))
   btrans _ _ _ = throwError ErrMismatch
 
-instance (BodyTrans Err (ByBLASHS p) a) => BodyTrans Err (ByBLASHS p) (SpecFlow a) where
+instance (BodyTrans (ByBLASHS p) a) => BodyTrans (ByBLASHS p) (SpecFlow a) where
   --
   type SpecToCom (ByBLASHS p) (SpecFlow a) = Stream (SpecToCom (ByBLASHS p) a)
   btrans b (SV s) (Flow a) = do u <- btrans b s a
                                 return $ Stream u
   btrans _ _ _ = throwError ErrMismatch
 
-instance Component c => EvalTrans Err (ByBLASHS p) c SpecEvaluator where
-  type SpecToEvl (ByBLASHS p) c SpecEvaluator = Eval (Run c) p
+instance Component c => EvalTrans (ByBLASHS p) c SpecEvaluator where
+  type SpecToEvl (ByBLASHS p) c SpecEvaluator = Eval p
   etrans _ _ = return . Eval

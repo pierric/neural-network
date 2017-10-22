@@ -13,6 +13,9 @@ Stability:           Experimental
 build-type:          Custom
 cabal-version:       >=1.10
 
+custom-setup
+  setup-depends:     base, filepath, directory, Cabal < 1.25
+
 flag vec128
   Description: Enable 128-bit vector hardware instructions.
   Default:     False
