@@ -32,9 +32,9 @@ import Data.NeuralNetwork.Backend.BLASHS.Utils
 import Data.NeuralNetwork.Backend.BLASHS.SIMD
 import System.Random.MWC
 import System.Random.MWC.Distributions
+import Control.Monad
 -- import GHC.Float (double2Float)
 import Data.Vector.Storable (Storable)
-import qualified Text.PrettyPrint.Free as P
 
 type VecR p = DenseVector p
 type MatR p = DenseMatrix p

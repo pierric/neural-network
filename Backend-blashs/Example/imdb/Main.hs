@@ -5,13 +5,16 @@
 module Main where
 
 import qualified Data.Vector as BV
+import Control.Monad
 import Control.Monad.Except
+import Control.Monad.IO.Class
 import Data.Data
 import System.IO (hFlush, stdout)
 import Data.IORef
 import Data.List (partition)
 import Text.Printf (printf)
-import Text.PrettyPrint.Free hiding ((</>))
+import Text.PrettyPrint hiding ((</>))
+import Text.PrettyPrint.HughesPJClass
 import Blas.Generic.Unsafe (Numeric)
 import Data.NeuralNetwork
 import Data.NeuralNetwork.Adapter
@@ -58,8 +61,8 @@ dotest (nn,_) dataset = do
     putStrLn $ "First 10 tests:"
     BV.forM_ (BV.take 10 dataset) $ \(ds,ev) -> do
       pv <- forward nn ds
-      putStrLn $ showPretty $ text "+" <+> pretty pv
-      putStrLn $ showPretty $ text "*" <+> pretty ev
+      putStrLn $ showPretty $ text "+" <+> pPrint pv
+      putStrLn $ showPretty $ text "*" <+> pPrint ev
   where
     postprocess :: Sentiment -> IO Int
     postprocess v = do
@@ -141,6 +144,4 @@ instance (MonadError ErrCode m, Numeric p, RealType p, SIMDable p) => BodyTrans 
         unsafeWriteV v i 1
         return v
 
-instance Pretty (DenseVector Double) where
-  pretty = prettyDenseVector
-showPretty x = displayS (renderPretty 0.4 500 x) ""
+showPretty = renderStyle (Style PageMode 500 0.4)

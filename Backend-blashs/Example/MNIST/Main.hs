@@ -9,9 +9,11 @@ import Data.List(foldl',partition,maximumBy)
 import Data.IORef
 import Text.Printf (printf)
 import Control.Monad
+import Control.Monad.IO.Class
 import Control.Monad.Except
 import System.Environment
-import Text.PrettyPrint.Free hiding (flatten)
+import Text.PrettyPrint hiding (flatten)
+import Text.PrettyPrint.HughesPJClass
 import System.IO (hFlush, stdout)
 import System.IO.Unsafe
 import Parser
@@ -129,10 +131,6 @@ postprocess v = do
 
 prettyResult a = do
     v <- postprocess a
-    return $ showPretty $ text (printf "%02d:" v) <+> pretty a
+    return $ showPretty $ text (printf "%02d:" v) <+> pPrint a
   where
-    showPretty x = displayS (renderPretty 0.4 500 x) ""
-
-instance Pretty (DenseVector Float) where
-  pretty vec = let a = unsafePerformIO (denseVectorToVector vec)
-               in encloseSep langle rangle comma $ map (text . printf "%.04f") (V.toList a)
+    showPretty = renderStyle (Style PageMode 500 0.4)

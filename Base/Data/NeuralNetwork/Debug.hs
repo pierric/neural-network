@@ -17,7 +17,9 @@ module Data.NeuralNetwork.Debug where
 import Data.Data
 import Control.Monad.Trans (liftIO, MonadIO)
 import Control.Monad.Except (MonadError)
-import Text.PrettyPrint.Free hiding ((</>))
+import Text.PrettyPrint hiding ((</>))
+import Text.PrettyPrint.HughesPJ
+import Text.PrettyPrint.HughesPJClass
 import Data.NeuralNetwork.Common
 import Data.NeuralNetwork.Adapter
 
@@ -33,8 +35,8 @@ instance (Pretty a, MonadIO m, MonadError ErrCode m) => BodyTrans m b (SpecDebug
   btrans b s (Debug name)= return $ Adapter to back
     where
       to inp = do liftIO $ putStrLn $ (name ++ "-(Forward):" )
-                  liftIO $ putStrLn $ showPretty $ indent 2 $ pretty inp
+                  liftIO $ putStrLn $ showPretty $ nest 2 $ pPrint inp
                   return ((), inp)
       back _ odelta = return odelta
 
-showPretty x = displayS (renderPretty 0.4 500 x) ""
+showPretty = renderStyle (Style PageMode 500 0.4)
