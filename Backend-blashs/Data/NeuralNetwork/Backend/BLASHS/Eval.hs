@@ -25,7 +25,10 @@ import Blas.Generic.Unsafe (Numeric)
 
 data Eval (m :: * -> *) p = Eval SpecEvaluator
 
+mse_eval :: (MonadIO m, SIMDable p, Numeric p) => DenseVector p -> m (DenseVector p)
 mse_eval x   = return x
+
+mse_cost :: (MonadIO m, SIMDable p, Numeric p) => DenseVector p -> DenseVector p -> m (DenseVector p)
 mse_cost x y = do v <- newDenseVector (size x)
                   v <<= ZipWith cost' x y
                   return v

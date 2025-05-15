@@ -24,12 +24,6 @@ stack build --flag neural-network-blashs:vec128
 - with *openblas* flag true in the flags section, please install the openblas by the official package management.
   - or else, install blas/lapack package.
 
-### Windows
-- Download OpenBLAS from http://www.openblas.net/
-- Modify the following fields in the stack.yaml
-  - *extra-include-dirs:* path-to-include-dir-of-openblas
-  - *extra-lib-dirs:* path-to-lib-dir-of-openblas
-
 ### Utilizing SIMD
 - The *vec128* flag for *neural-network-blashs* can be turned on, and many operations will utilize SIMD for better performance.
 ```yaml

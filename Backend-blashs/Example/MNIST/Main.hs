@@ -16,6 +16,7 @@ import Text.PrettyPrint hiding (flatten)
 import Text.PrettyPrint.HughesPJClass
 import System.IO (hFlush, stdout)
 import System.IO.Unsafe
+import System.ProgressBar (Progress(..), newProgressBar, defStyle, incProgress)
 import Parser
 
 main = do x <- runExceptT $ compile byBLASHSf (In2D 28 28,
@@ -101,11 +102,14 @@ dotest !(nn,_) = do
 
 online :: (ModelCst n e, Inp n ~ PImage, Out n ~ PLabel, Run n ~ IO)
        => Float -> [(Inp n, Out n)] -> (n,e) -> IO (n,e)
-online rate ds !nn = walk ds nn
+online rate ds !nn = do 
+  pb <- newProgressBar defStyle 1 (Progress 0 (length ds) ())
+  walk pb ds nn
   where
-    walk []     !nn = return nn
-    walk (d:ds) !nn = do !nn <- learn nn d rate
-                         walk ds nn
+    walk pb []     !nn = return nn
+    walk pb (d:ds) !nn = do !nn <- learn nn d rate
+                            incProgress pb 1
+                            walk pb ds nn
 
 iterateM :: (MonadIO m) => Int -> a -> (a -> m a) -> m a
 iterateM n x f = go 0 x

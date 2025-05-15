@@ -2,7 +2,7 @@
 {-# LANGUAGE GHCForeignImportPrim, UnliftedFFITypes #-}
 module Data.NeuralNetwork.Backend.BLASHS.SIMD where
 
-import Data.Vector.Storable.Mutable as MV
+import Data.Vector.Storable.Mutable as MV hiding (forM_)
 import qualified Data.Vector.Storable as SV
 import Control.Exception
 import Control.Monad
@@ -12,6 +12,7 @@ import GHC.Base
 import GHC.Exts
 import GHC.Ptr (Ptr(..))
 import Foreign.Storable (Storable(..))
+import Prelude hiding (tanh)
 
 foreign import prim "vfcomp_oge" fcomp_oge :: FloatX8# -> FloatX8# -> Word32X8#
 foreign import prim "vselect"    select    :: Word32X8# -> FloatX8# -> FloatX8# -> FloatX8#
@@ -28,7 +29,7 @@ instance Comparable (SIMDPACK Float) where
   compareVector GE (FloatX8 x) (FloatX8 y) = Word32X8 (fcomp_oge x y)
   selectVector (Word32X8 s) (FloatX8 x) (FloatX8 y) = FloatX8 (select s x y)
 
-class SIMDable a where
+class (Num a, SIMDVector (SIMDPACK a), Comparable (SIMDPACK a)) => SIMDable a where
   data SIMDPACK a
   hadamard :: (SIMDPACK a -> SIMDPACK a -> SIMDPACK a) -> IOVector a -> IOVector a -> IOVector a -> IO ()
   konst    :: a -> SIMDPACK a
@@ -36,12 +37,14 @@ class SIMDable a where
   plus     :: SIMDPACK a -> SIMDPACK a -> SIMDPACK a
   minus    :: SIMDPACK a -> SIMDPACK a -> SIMDPACK a
   times    :: SIMDPACK a -> SIMDPACK a -> SIMDPACK a
+  divide   :: SIMDPACK a -> SIMDPACK a -> SIMDPACK a
 
 instance SIMDable Float where
   data SIMDPACK Float = FloatX8 FloatX8#
   plus   (FloatX8 a) (FloatX8 b) = FloatX8 (plusFloatX8#  a b)
   minus  (FloatX8 a) (FloatX8 b) = FloatX8 (minusFloatX8# a b)
   times  (FloatX8 a) (FloatX8 b) = FloatX8 (timesFloatX8# a b)
+  divide (FloatX8 a) (FloatX8 b) = FloatX8 (divideFloatX8# a b)
   hadamard op v x y = assert (MV.length x == sz && MV.length y == sz) $ do
     let sv = unsafeCast v :: IOVector (SIMDPACK Float)
         sx = unsafeCast x :: IOVector (SIMDPACK Float)
@@ -93,19 +96,27 @@ instance SIMDable Float where
             (vz0,vz1,vz2,vz3,vz4,vz5,vz6,_) = unpackVector (op vx)
         forM_ (zip [0..n-1] [vz0,vz1,vz2,vz3,vz4,vz5,vz6]) $ uncurry (unsafeWrite z)
 
-relu, relu' :: SIMDPACK Float -> SIMDPACK Float
-relu  x = let v0 = broadcastVector 0
+relu, relu' :: (SIMDable a,  Comparable (SIMDPACK a)) => SIMDPACK a -> SIMDPACK a
+relu  x = let v0 = konst 0
           in selectVector (compareVector GE x v0) x v0
-relu' x = let v0 = broadcastVector 0
-              v1 = broadcastVector 1
+relu' x = let v0 = konst 0
+              v1 = konst 1
           in selectVector (compareVector GE v0 x) v0 v1
 
-cost' :: SIMDPACK Float -> SIMDPACK Float -> SIMDPACK Float
+cost' :: SIMDable a => SIMDPACK a -> SIMDPACK a -> SIMDPACK a
 cost' a y = selectVector (compareVector GE a y)
-              (selectVector (compareVector GE y (broadcastVector 1))
-                (broadcastVector 0)
+              (selectVector (compareVector GE y (konst 1))
+                (konst 0)
                 (minus a y))
               (minus a y)
+
+tanh, tanh' :: SIMDable a => SIMDPACK a -> SIMDPACK a
+tanh  x = let x2 = times x x
+              x3 = times x x2
+          in minus x (divide x3 (konst 3))
+tanh' x = let a = tanh x
+              b = times a a
+          in minus (konst 1) b
 
 instance Storable (SIMDPACK Float) where
     sizeOf x     = vectorSize x * elementSize x

@@ -47,12 +47,12 @@ many cnt dec = sequence (replicate (fromIntegral cnt) dec)
 
 trainingData :: IO ([Image], [Label])
 trainingData = do
-    s <- decompress <$> BL.readFile "tdata/train-images-idx3-ubyte.gz"
-    t <- decompress <$> BL.readFile "tdata/train-labels-idx1-ubyte.gz"
+    s <- decompress <$> BL.readFile "data/train-images-idx3-ubyte.gz"
+    t <- decompress <$> BL.readFile "data/train-labels-idx1-ubyte.gz"
     return (runGet decodeImages s, runGet decodeLabels t)
 
 testData :: IO ([Image], [Label])
 testData = do
-    s <- decompress <$> BL.readFile "tdata/t10k-images-idx3-ubyte.gz"
-    t <- decompress <$> BL.readFile "tdata/t10k-labels-idx1-ubyte.gz"
+    s <- decompress <$> BL.readFile "data/t10k-images-idx3-ubyte.gz"
+    t <- decompress <$> BL.readFile "data/t10k-labels-idx1-ubyte.gz"
     return (runGet decodeImages s, runGet decodeLabels t)
