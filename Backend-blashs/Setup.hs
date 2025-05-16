@@ -23,11 +23,12 @@ myBuildHook pkgdesc binfo uh bf = do
       sobj = buildroot </> (vecmod ++ ".o")
       Just dirs = hsSourceDirs . libBuildInfo <$> library pkgdesc
   dir <- filterM (doesDirectoryExist . (</> "cbits") . getSymbolicPath) dirs
-  if (null dir)
-    then
-      buildHook simpleUserHooks pkgdesc binfo uh bf
-    else do
-      let sdir = getSymbolicPath $ head dir
+  case dir of
+    [] -> buildHook simpleUserHooks pkgdesc binfo uh bf
+    cbitsDir:xs -> do
+      when (not (null xs)) (print "WARNING: found extra cbits folders?")
+
+      let sdir = getSymbolicPath $ cbitsDir
           ssrc = sdir </> "cbits" </> (vecmod ++ ".ll")
           verb = fromFlagOrDefault normal (buildVerbosity bf)
       runProgramInvocation verb $ simpleProgramInvocation "llc" ["-filetype=obj", "-o=" ++ sobj, ssrc]
@@ -35,10 +36,13 @@ myBuildHook pkgdesc binfo uh bf = do
       let slib = buildroot </> ("lib" ++ vecmod ++ ".a")
       createArLibArchive verb binfo slib [sobj]
       extralib <- canonicalizePath buildroot
-      let pkgname = fromString "t1"
-          pkgdesc' = updatePackageDescription (Nothing, [(pkgname, libBI)]) pkgdesc
-          libBI    = emptyBuildInfo {extraLibs = [vecmod], extraLibDirs = [extralib]}
+
+      -- append the extra obj file for the dynamic library
+      let extra_bi = emptyBuildInfo {extraLibs = [vecmod], extraLibDirs = [extralib]}
+          pkgdesc' = updatePackageDescription (Just extra_bi, []) pkgdesc
+
       buildHook simpleUserHooks pkgdesc' binfo uh bf
+
       -- however the library is static and doesn't include the vecmod
       -- we will then explicitly to insert it.
       withAllComponentsInBuildOrder pkgdesc' binfo $ \comp compbi -> do

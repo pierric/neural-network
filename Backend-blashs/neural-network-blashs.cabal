@@ -1,7 +1,8 @@
+cabal-version:       2.2
 name:                neural-network-blashs
 version:             0.1.0.0
 license-file:        LICENSE
-license:             BSD3
+license:             BSD-3-Clause
 author:              Jiasen Wu
 maintainer:          jiasenwu@hotmail.com
 homepage:            https://github.com/pierric/neural-network
@@ -11,7 +12,9 @@ Synopsis:            Yet Another High Performance and Extendable Neural Network 
 Description:         Provides execution backend of neural network on top of blas-hs.
 Stability:           Experimental
 build-type:          Custom
-cabal-version:       >=1.10
+
+custom-setup
+  setup-depends:     base >= 4.7 && < 5, Cabal >= 2.2, filepath, directory
 
 flag vec128
   Description: Enable 128-bit vector hardware instructions.
@@ -26,7 +29,7 @@ flag vec512
   Default:     False
   Manual:      True
 
-library
+common settings
   if flag(vec128)
     hs-source-dirs:     ., vec128
     ghc-options:        -fllvm
@@ -44,22 +47,27 @@ library
   build-depends:       base >= 4.7 && < 5, blas-hs, mwc-random, mtl, vector,
                        constraints, ghc-prim, containers, syb, pretty,
                        neural-network-base
+  default-language:    Haskell2010
+  default-extensions:  TypeFamilies, DeriveDataTypeable, MultiParamTypeClasses,
+                       FlexibleContexts, FlexibleInstances, GADTs, BangPatterns,
+                       TypeOperators
+
+library
+  import: settings
   exposed-modules:     Data.NeuralNetwork.Backend.BLASHS
   other-modules:       Data.NeuralNetwork.Backend.BLASHS.Layers
                        Data.NeuralNetwork.Backend.BLASHS.Utils
                        Data.NeuralNetwork.Backend.BLASHS.LSTM
                        Data.NeuralNetwork.Backend.BLASHS.Eval
                        Data.NeuralNetwork.Backend.BLASHS.SIMD
-  default-language:    Haskell2010
-  default-extensions:  TypeFamilies, DeriveDataTypeable, MultiParamTypeClasses,
-                       FlexibleContexts, FlexibleInstances, GADTs, BangPatterns,
-                       TypeOperators
-test-suite s1
+test-suite tests
+  import: settings
   type:               exitcode-stdio-1.0
   main-is:            Test/S1.hs
-  hs-source-dirs:     ., novec
-  other-modules:      Data.NeuralNetwork.Backend.BLASHS.Utils,
+  hs-source-dirs:     .
+  other-modules:      Test.Utils
+                      Test.Gen
+                      Data.NeuralNetwork.Backend.BLASHS.Utils
                       Data.NeuralNetwork.Backend.BLASHS.SIMD
-                      Test.Utils, Test.Gen
-  build-depends:      hspec, QuickCheck, base, hmatrix, vector, blas-hs, neural-network-base
-  default-language:   Haskell2010
+  build-depends:      hspec, QuickCheck, base, hmatrix, vector, blas-hs,
+                      neural-network-base, neural-network-blashs
