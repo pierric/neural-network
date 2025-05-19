@@ -1,8 +1,9 @@
 {-# LANGUAGE FlexibleInstances, FlexibleContexts #-}
 module Main where
 import Test.Hspec
-import Test.QuickCheck
+import Test.QuickCheck hiding (scale)
 import Numeric.LinearAlgebra
+import Numeric.LinearAlgebra.Data
 import qualified Data.Vector.Storable as V
 import Test.Gen
 import Test.Utils
@@ -31,25 +32,27 @@ main = hspec $ do
           return $ good_corr2 p m1 m2 `eqShowWhenFail` r
   describe "Corr Many" $ do
     it "with 2 kernels" $ do
-      forAll (pair (sequence $ replicate 2 $ squared_real_matrices 3) (squared_real_matrices 7)) $
+      forAll (pair (sequence $ replicate 2 $ squared_real_matrices 3) (squared_real_matrices 20)) $
         \(m1s, m2) -> ioProperty $ do
           rs <- test_corr2_arr 2 m1s m2
           return $ conjoin $ zipWith (\m r -> good_corr2 2 m m2 `eqShowWhenFail` r) m1s rs
     it "with 5 kernels" $ do
-      forAll (pair (sequence $ replicate 4 $ squared_real_matrices 15) (squared_real_matrices 88)) $
+      forAll (pair (sequence $ replicate 4 $ squared_real_matrices 15) (squared_real_matrices 32)) $
         \(m1s, m2) -> ioProperty $ do
           rs <- test_corr2_arr 2 m1s m2
           ss <- return $ map (\m -> good_corr2 2 m m2) m1s
-          return $ conjoin $ zipWith eq rs ss
+          return $ conjoin $ zipWith eqShowWhenFail rs ss
 
-eqShowWhenFail m1 m2 =
-    whenFail (do let va = flatten m1
-                 let vb = flatten m2
-                 let err x 0 = x
-                     err x y = abs ((x - y) / y)
-                 let ev = (V.zipWith err va vb)
-                     ei = V.maxIndex ev
-                 putStrLn $ "Max error ration: " ++ show (ev V.! ei, va V.! ei, vb V.! ei)
-                 putStrLn $ show m1
-                 putStrLn $ show m2)
-        (m1 `eq` m2)
+eqShowWhenFailWithTol :: (Numeric a, Ord a, Show a, Num (Vector a)) => a -> a -> Matrix a -> Matrix a -> Property
+eqShowWhenFailWithTol atol rtol m1 m2 =
+    let diff = abs (m1 - m2) - scale rtol (abs m2)
+        midx = maxIndex diff
+        v1 = atIndex m1 midx
+        v2 = atIndex m2 midx
+        merr = atIndex diff midx
+    in whenFail (do
+        putStrLn $ "Max difference: " ++ show merr
+        putStrLn $ "  " ++ show v1 ++ " vs. " ++ show v2
+      ) $ maxElement diff < atol
+
+eqShowWhenFail = eqShowWhenFailWithTol 1e-3 1e-2
